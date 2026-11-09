@@ -125,9 +125,96 @@ flowchart TB
 
 ---
 
-## 🚀 安装与快速上手
+## ⚠️ 安全须知（V1 现状）
 
-> 🚧 **开源准备中**：平台源代码正在整理并将陆续开源。首个版本发布后，本节将补充完整的安装步骤与快速上手指引。
+**当前版本（M1）尚未实现认证与授权**，管理 API 无登录校验。这意味着**任何能访问监听端口的人都可完全接管平台**——安装任意服务、启停进程、上传文件。
+
+为此平台已采取两项默认防线：
+
+1. **默认仅绑定 `127.0.0.1`**（回环地址）。需对外提供服务时必须显式传 `-addr`，并由使用者自行在网络层收敛访问范围（防火墙 / 反向代理 + 访问控制）。
+2. **出厂不预置任何升级服务端地址**（TFTP 为空 = OTA 未启用），避免误连内网地址。
+
+> 🚧 **切勿将本版本直接暴露在公网或不可信网络**。认证机制列入 M2 之前的必做项。
+
+---
+
+## 🛠 技术架构与模块
+
+积微 Cairn 控制台为 **Go 单体二进制**（内嵌 Web UI，纯 Go SQLite，无 CGO 依赖），面向边缘现场部署。
+
+```
+cairn-platform/
+├── main.go                    # 装配入口：logx → store → fork 引擎 → adapt → api → web
+├── internal/
+│   ├── adapt/                 # 装配层适配器（supervisor → api，依赖方向控制）
+│   ├── api/                   # HTTP API：services / manifest（安装制）/ dashboard / settings / logs / upgrade
+│   ├── buildinfo/             # 版本信息（构建期注入）
+│   ├── config/                # 配置类型、默认值、校验与数据根锚定（CAIRN_ROOT）
+│   ├── hostmetrics/           # 主机指标采集（CPU/内存/磁盘/网络，双平台）
+│   ├── logx/                  # 日志库：轮转 / gorm 集成 / sink / swap
+│   ├── runtime/               # 进程管理器抽象 + fork 实现（进程树管控 / 孤儿认领）
+│   ├── store/                 # SQLite 存储层（gorm）
+│   ├── supervisor/            # 监管引擎：九态状态机 / 依赖拓扑 / 健康探针 / 重启策略
+│   └── web/                   # Web 路由 + 内嵌静态资源
+├── configurations/            # 官方组态（场景方案层，按组态持续沉淀）
+└── docs/
+    └── architecture/          # 架构与设计文档
+```
+
+依赖方向：`adapt` 是唯一同时 import `api` 与 `supervisor` 的包，保证 `api` 与 `supervisor` 互不依赖；`runtime` 只回答「进程管理器能做什么」，健康、策略、依赖、版本全部在 `supervisor`。
+
+---
+
+## 🖥 运行环境
+
+**目标运行环境：Linux（amd64 / arm64）与 Windows（amd64）**，面向 IoT 边缘现场部署。
+
+| 环境 | 支持情况 |
+|---|---|
+| Linux + systemd | 生产目标（arm64 优先，amd64 同源）；平台自身注册 systemd 单元自守护 |
+| Windows（amd64） | 运行平台已支持：进程监管、指标采集、安装与升级链路均可用。**平台自守护（SCM 服务封装）尚未实现**，当前需前台或计划任务常驻 |
+| 开发机（Windows / Linux） | 真 fork 监管引擎可直接运行，跨平台代码路径一致（`_linux.go` / `_windows.go` 两套 build-tag 实现，暂不支持 macOS） |
+
+平台自身不进自身纳管清单，其存活交由操作系统级守护（Linux systemd `Restart=always` / Windows SCM 服务待实现）。
+
+### 跨平台差异（同一二进制，按 GOOS 编译）
+
+| 能力 | Linux | Windows |
+|---|---|---|
+| 进程树管控 | `setsid` + 进程组信号 | Job Object（`TerminateJobObject` 一次终结整树） |
+| 优雅停止 | 进程组 `SIGTERM` → 宽限 → `SIGKILL` | `CTRL_BREAK_EVENT` → 宽限 → `TerminateJobObject`（无控制台时直接硬杀） |
+| 平台重启后继管 | 读 `/proc` 零中断认领孤儿进程 | `GetProcessTimes` 创建时间 + 映像路径校验后零中断认领 |
+| PID 复用防护 | `/proc/{pid}/stat` starttime | `GetProcessTimes` 进程创建时间 |
+| 主机指标（CPU/内存/磁盘） | `/proc` + `statfs` | `GetSystemTimes` / `GlobalMemoryStatusEx` / `GetDiskFreeSpaceExW` |
+| 进程指标（CPU/内存） | `/proc/{pid}` 差分（statm RSS） | `GetProcessTimes` / `GetProcessMemoryInfo`（工作集） |
+| 版本切换 | `current` 软链原子切换 | 无软链特权：`current.txt` + DB `Active` 权威 |
+| 平台自守护 | systemd 单元（`Restart=always`） | **待实现**：SCM 服务封装未落地 |
+| U盘（OTG）升级 | 待实现（`/api/usb/status` 返回 501） | 待实现（同上，需盘符枚举替代挂载点监测） |
+
+> 进程内存口径差异：Linux 取 `/proc/{pid}/statm` 的 RSS（不含共享页），Windows 取 `WorkingSetSize`（含共享/文件映射页），同一负载下 Windows 读数通常偏大，跨平台横向比较时需注意。CPU 口径两侧一致（累计 CPU 时间差分）。
+
+---
+
+## 📁 生产部署布局（Linux）
+
+```
+/opt/cairn/                               ← 运行目录（systemd: cairn-console.service，Restart=always 自守护）
+├── cairn                                 ← 平台二进制
+├── data/                                 ← 平台数据（配置库 / fork 认领登记）
+│   ├── cairn.db                          ← SQLite 配置库（WAL）
+│   └── runtime/                          ← cairn-{id}.json 进程登记
+├── services/                             ← 服务仓库（安装制统一落盘；os/arch 按本机平台自动展开）
+│   └── linux/{amd64|arm|arm64}/
+│       └── {name}/
+│           ├── {version}/bin/…           ← 安装产物
+│           ├── {version}/manifest.json
+│           └── current → {version}       ← 版本切换软链（Windows 用 current.txt + DB Active）
+└── logs/                                 ← 平台日志轮转
+```
+
+---
+
+## 🚀 安装与快速上手
 
 **获取源码**：
 
@@ -136,21 +223,64 @@ git clone https://github.com/jiwei-cairn/cairn-platform.git
 cd cairn-platform
 ```
 
-**保持关注**：
+**构建**（Makefile）：
 
-- 点击仓库右上角 **Watch** → **Releases only**（仅关注发布），或点一颗 **Star** ⭐，第一时间获知首个开源版本。
+```bash
+make linux          # Linux amd64/arm64 产物
+make windows        # Windows amd64 产物
+make all            # 全平台
+make run            # 本机直跑（真 fork 监管引擎；默认仅监听 127.0.0.1，加 -addr 对外）
+make vet            # 双平台编译校验（CI 红线）
+```
+
+Windows 用户也可不用 make，直接：
+
+```powershell
+go build -o dist\cairn.exe .
+```
+
+**生产部署（Linux）**：
+
+```bash
+install -D dist/cairn-linux-arm64/cairn /opt/cairn/cairn
+cd /opt/cairn && ./cairn -addr :8090
+```
+
+**生产部署（Windows）**：将 `cairn.exe` 注册为 Windows 服务后运行（SCM 封装待实现，当前可前台常驻）：
+
+```powershell
+dist\cairn-windows-amd64\cairn.exe -addr :8090
+```
+
+### 数据根（data / logs / services 的落盘位置）
+
+平台运行数据不依赖进程当前工作目录，按以下优先级锚定（`--root` 可显式覆盖）：
+
+1. `--root <目录>` 命令行标志
+2. `CAIRN_ROOT` 环境变量（**Windows 服务注册形态用这个**，服务无法传标志）
+3. 可执行文件所在目录（部署形态默认：`cairn[.exe]` 旁生成 `data/` `logs/` `services/`）
+4. 当前工作目录（仅 `go run` / `go test` 等开发形态兜底）
+
+> 这一点对 Windows 尤其关键：SCM 启动的服务工作目录默认为 `C:\Windows\System32`，若不锚定就会把数据库与日志静默写进系统目录（非管理员账户下还会直接失败）。
+
+### 核心概念
+
+- **安装制**：所有微服务（自研 + 开源）经「市场 / 本地包 + manifest.json 说明文档」安装进入平台，落盘 `services/{os}/{arch}/{name}/{version}`；平台只管理由平台安装的服务
+- **监管**：fork/exec 父子模型 + 九态状态机 + 健康探针（L1 存活 / L2 HTTP·TCP）+ 依赖拓扑编排，supervisor 引擎负责；平台崩溃经孤儿认领零中断恢复
+- **升级**：OTA（TFTP）/ OTG（U盘）/ LOCAL（本地包）三来源统一任务管线：下载→验签→预检→停服→安装→切换→健康观察→提交，失败自动回滚
+
+详细设计见 [docs/architecture/](./docs/architecture/)。
 
 ---
 
-## 📁 目录结构
+## 📦 发布路线
 
-```
-cairn-platform/
-├── LICENSE          # MIT 开源协议
-└── README.md        # 项目说明（本文件）
-```
+平台代码已完成自前身项目向积微 Cairn 的平台化整合，现已以积微 Cairn 的统一身份面向 IoT 场景。
 
-> 仓库正处于开源起步阶段，平台各模块源码将随开源计划陆续合入，目录结构将同步更新。
+- [x] M1：supervisor fork 引擎 + 安装制 + Windows 平台补齐
+- [ ] M2：升级管线（OTA/OTG/LOCAL）完整落地
+- [ ] M3：组态编排与总线
+- [ ] 首个开源 Release
 
 ---
 

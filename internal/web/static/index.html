@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>积微 Cairn 微服务管理平台</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- ═══════════ Sidebar ═══════════ -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon"><i class="bi bi-lightning-charge-fill"></i></div>
+      <div>
+        <div class="brand-text">积微 Cairn</div>
+        <div class="brand-sub">Cairn Platform</div>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="sidebar-item active" id="nav-dash" onclick="switchSection('dash')">
+        <i class="bi bi-speedometer2"></i><span>总览</span>
+      </button>
+      <button class="sidebar-item" id="nav-service" onclick="switchSection('service')">
+        <i class="bi bi-diagram-3"></i><span>管理</span>
+      </button>
+      <button class="sidebar-item" id="nav-market" onclick="switchSection('market')">
+        <i class="bi bi-shop"></i><span>市场</span>
+      </button>
+      <button class="sidebar-item" id="nav-log" onclick="switchSection('log')">
+        <i class="bi bi-journal-text"></i><span>日志</span>
+      </button>
+      <button class="sidebar-item" id="nav-settings" onclick="switchSection('settings')">
+        <i class="bi bi-gear"></i><span>设置</span>
+      </button>
+    </nav>
+    <div class="sidebar-footer" id="sidebar-version">版本 —</div>
+  </aside>
+
+  <!-- ═══════════ Main ═══════════ -->
+  <main class="app-main">
+    <div class="main-inner">
+
+      <!-- ═══════════ ◆ section-dash 总览（默认区块） ═══════════ -->
+      <section id="section-dash" class="app-section">
+        <div class="section-header section-header-row">
+          <div>
+            <h4><i class="bi bi-speedometer2 me-2" style="color:var(--primary)"></i>总览</h4>
+            <div class="sub">全局微服务总览 · 统计 · 系统性能指标 · 点击统计卡筛选服务状态</div>
+          </div>
+          <span class="count-pill" id="dash-refresh-info">—</span>
+        </div>
+
+        <!-- 数据过期横幅（轮询失败保留旧数据时显示） -->
+        <div class="stale-banner d-none mt-3" id="dash-stale" role="alert"></div>
+
+        <!-- 平台自身只读条（Q3：展示但不参与监管，无任何操作按钮） -->
+        <div class="info-banner mt-3 d-flex align-items-center flex-wrap" style="gap:10px;">
+          <i class="bi bi-cpu-fill" style="color:var(--primary)"></i>
+          <span class="fw-semibold">积微 Cairn 微服务管理平台</span>
+          <span class="led led-on" aria-hidden="true"></span><span class="text-muted">运行中</span>
+          <span class="text-muted">版本 <span class="fw-semibold" id="dash-platform-version">—</span></span>
+          <span class="text-muted">运行时长 <span class="fw-semibold" id="dash-platform-uptime">—</span></span>
+          <span class="ms-auto small text-muted"><i class="bi bi-shield-lock me-1"></i>平台自守护：<span id="dash-platform-daemon">—</span> · 只读，不参与纳管监管</span>
+        </div>
+
+        <!-- 系统运行指标：左列两张卡（整机运行时长 / 网络流量）+ 右列使用率指标面板。
+             左列两卡由 grid 拉伸，故纵向长度合计恒等于右侧指标卡的纵向长度。 -->
+        <div class="host-metrics mt-3">
+          <div class="host-metrics-aside">
+            <div class="host-side-card">
+              <div class="host-side-head"><i class="bi bi-clock-history"></i><span>系统运行时长</span></div>
+              <div class="host-side-val" id="dash-host-uptime">—</div>
+              <div class="host-side-sub" id="dash-host-boot">—</div>
+            </div>
+            <div class="host-side-card">
+              <div class="host-side-head"><i class="bi bi-arrow-down-up"></i><span>网络流量</span></div>
+              <div class="host-side-rates">
+                <span class="rate rx"><i class="bi bi-arrow-down"></i><span id="dash-net-rx-rate">—</span></span>
+                <span class="rate tx"><i class="bi bi-arrow-up"></i><span id="dash-net-tx-rate">—</span></span>
+              </div>
+              <div class="host-side-spark" id="dash-spark-net"></div>
+              <div class="host-side-totals">
+                <div class="tot rx"><i class="bi bi-arrow-down"></i><span>累计</span><b id="dash-net-rx-total">—</b></div>
+                <div class="tot tx"><i class="bi bi-arrow-up"></i><span>累计</span><b id="dash-net-tx-total">—</b></div>
+              </div>
+            </div>
+          </div>
+          <div class="data-panel">
+            <div class="panel-title"><i class="bi bi-cpu" style="color:var(--primary)"></i>系统性能指标 <span class="spark-scope">近 1 小时趋势</span></div>
+            <div class="host-metrics-rows">
+              <div class="host-metric">
+                <div class="host-metric-head"><span>CPU 使用率</span><span class="fw-semibold" id="dash-m-cpu">—</span></div>
+                <div class="progress host-metric-bar"><div class="progress-bar" id="dash-m-cpu-bar" role="progressbar" style="width:0%"></div></div>
+                <div class="host-spark" id="dash-spark-cpu"></div>
+              </div>
+              <div class="host-metric">
+                <div class="host-metric-head"><span>内存使用率</span><span class="fw-semibold" id="dash-m-mem">—</span></div>
+                <div class="progress host-metric-bar"><div class="progress-bar" id="dash-m-mem-bar" role="progressbar" style="width:0%"></div></div>
+                <div class="host-spark" id="dash-spark-mem"></div>
+              </div>
+              <div class="host-metric">
+                <div class="host-metric-head"><span>磁盘使用率</span><span class="fw-semibold" id="dash-m-disk">—</span></div>
+                <div class="progress host-metric-bar"><div class="progress-bar" id="dash-m-disk-bar" role="progressbar" style="width:0%"></div></div>
+                <div class="host-spark" id="dash-spark-disk"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 统计卡行（可点击：筛选下方服务运行状态表） -->
+        <div class="row g-3 mt-3">
+          <div class="col-6 col-lg-3">
+            <div class="summary-card summary-card-click" id="dash-card-total" onclick="setDashFilter('all')" role="button" title="点击查看全部服务运行状态">
+              <div class="val" id="dash-total-count">—</div>
+              <div class="lbl">纳管服务总数</div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="summary-card summary-card-click" id="dash-card-ok" onclick="setDashFilter('ok')" role="button" title="点击查看正常服务运行状态">
+              <div class="val" id="dash-ok-count" style="color:var(--success)">—</div>
+              <div class="lbl">正常服务</div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="summary-card summary-card-click" id="dash-card-warn" onclick="setDashFilter('warn')" role="button" title="点击查看告警服务运行状态">
+              <div class="val" id="dash-warn-count" style="color:var(--warning)">—</div>
+              <div class="lbl">告警服务</div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="summary-card summary-card-click" id="dash-card-err" onclick="setDashFilter('err')" role="button" title="点击查看异常服务运行状态">
+              <div class="val" id="dash-err-count">—</div>
+              <div class="lbl">异常服务</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 服务运行状态表（点击统计卡联动筛选；原「运行」页功能合并至此，只读） -->
+        <div class="data-panel mt-3">
+          <div class="filter-bar mb-3">
+            <div class="chip-row" id="dash-filter-chips"></div>
+            <span class="ms-auto small" style="color:var(--muted-color)" id="dash-visible-info"></span>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead>
+                <tr><th>服务</th><th>状态</th><th>告警原因</th><th>版本</th><th class="num-cell">连续运行</th>
+                    <th class="num-cell">累计启动</th><th class="num-cell">CPU</th><th class="num-cell">内存 RSS</th><th class="num-cell">网络 ↓/↑</th><th class="text-end">操作</th></tr>
+              </thead>
+              <tbody id="dash-services-tbody"></tbody>
+            </table>
+          </div>
+          <div id="dash-services-state"></div>
+        </div>
+
+        <div id="dash-state"></div>
+      </section>
+      <!-- ═══════════ ◆ section-service 管理（升级/卸载/配置 + 纳管定义） ═══════════ -->
+      <section id="section-service" class="app-section d-none">
+        <div class="section-header">
+          <h4><i class="bi bi-diagram-3 me-2" style="color:var(--primary)"></i>管理</h4>
+          <div class="sub">微服务运维：升级（OTA / OTG / LOCAL）· 卸载 · 配置，及纳管定义</div>
+        </div>
+        <!-- 升级中心 · OTA 源状态（置顶展示；OTG U盘入口统一至各服务卡片升级按钮） -->
+        <div class="data-panel mt-3" id="up-tftp-banner-wrap">
+          <div class="panel-title"><i class="bi bi-cloud-arrow-down" style="color:var(--primary)"></i>升级中心 · OTA 源状态</div>
+          <div class="info-banner mb-0" id="up-tftp-banner" role="status">OTA 源状态加载中…</div>
+        </div>
+
+        <div class="landing-toolbar mt-3">
+          <span class="count-pill">已纳管 <span id="svc-count" class="fw-semibold">0</span> 个服务</span>
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-outline-primary" id="up-check-btn" onclick="checkUpdates()" title="从 OTA 服务端拉取 index.json 清单">
+              <i class="bi bi-arrow-repeat me-1"></i>检查更新
+            </button>
+            <button class="btn btn-primary" onclick="openServiceModal(0)"><i class="bi bi-plus-lg me-1"></i>新建服务</button>
+          </div>
+        </div>
+
+        <!-- 升级任务全局横幅（进行中锁定入口，点击重开进度 Modal） -->
+        <div class="info-banner mt-3 d-none cursor-pointer" id="up-task-banner" role="status" onclick="reopenUpgradeModal()"></div>
+
+        <div class="row g-3 mt-1" id="svc-cards"></div>
+        <div id="svc-state"></div>
+
+        <div class="data-panel mt-3" id="up-records">
+          <div class="panel-title"><i class="bi bi-journal-clock" style="color:var(--primary)"></i>升级历史</div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead>
+                <tr><th>时间</th><th>服务</th><th>版本变更</th><th>来源</th><th>结果</th><th class="text-end">操作</th></tr>
+              </thead>
+              <tbody id="up-records-tbody"></tbody>
+            </table>
+          </div>
+          <div id="up-records-state"></div>
+        </div>
+      </section>
+
+      <!-- ═══════════ ◆ section-market 市场 ═══════════ -->
+      <section id="section-market" class="app-section d-none">
+        <div class="section-header">
+          <h4><i class="bi bi-shop me-2" style="color:var(--primary)"></i>市场</h4>
+          <div class="sub">微服务目录与产品套件 · 标签筛选 · 瀑布流展示</div>
+        </div>
+
+        <!-- 顶部 Tab -->
+        <div class="market-tabs mt-3" id="market-tabs"></div>
+
+        <!-- 标签筛选 -->
+        <div class="data-panel mt-3">
+          <div class="chip-row" id="market-tag-chips"></div>
+        </div>
+
+        <!-- 瀑布流卡片 -->
+        <div class="market-grid mt-3" id="market-grid"></div>
+        <div id="market-state"></div>
+      </section>
+
+      <!-- ═══════════ ◆ section-log 日志中心 ═══════════ -->
+      <section id="section-log" class="app-section d-none">
+        <div class="section-header">
+          <h4><i class="bi bi-journal-text me-2" style="color:var(--primary)"></i>日志</h4>
+          <div class="sub">SSE 实时跟踪、过滤检索与导出</div>
+        </div>
+        <div class="data-panel mt-3">
+          <div class="filter-bar">
+            <div class="fb-item">
+              <label for="log-service">服务</label>
+              <select class="form-select" id="log-service" onchange="onLogServiceChange()"></select>
+            </div>
+            <div class="fb-item fb-item-sm">
+              <label for="log-level">级别</label>
+              <select class="form-select" id="log-level" onchange="onLogLevelChange()">
+                <option value="">全部级别</option>
+                <option value="DEBUG">DEBUG</option>
+                <option value="INFO">INFO</option>
+                <option value="WARN">WARN</option>
+                <option value="ERROR">ERROR</option>
+              </select>
+            </div>
+            <div class="fb-item">
+              <label for="log-keyword">关键字</label>
+              <input type="text" class="form-control" id="log-keyword" placeholder="即时过滤已缓冲行并高亮命中词" oninput="onLogKeywordInput()">
+            </div>
+            <button class="btn btn-outline-secondary" id="log-pause" onclick="toggleLogPause()" title="暂停/继续（缓冲不断流）">
+              <i class="bi bi-pause-fill me-1"></i>暂停<span class="pending-badge d-none" id="log-pending-badge">+0</span>
+            </button>
+            <button class="btn btn-outline-secondary" onclick="confirmClearLogs()" title="清空面板缓冲（不影响后端存储）">
+              <i class="bi bi-eraser me-1"></i>清屏
+            </button>
+            <button class="btn btn-outline-primary" onclick="openLogExport()" title="按服务与时间范围导出">
+              <i class="bi bi-download me-1"></i>导出
+            </button>
+            <span class="ms-auto small d-flex align-items-center gap-2" style="color:var(--muted-color)">
+              <span id="log-buffer-info">缓冲 0 行</span>
+              <span class="led led-off" id="log-conn-led" aria-hidden="true"></span>
+              <span id="log-conn-text" role="status">未连接</span>
+            </span>
+          </div>
+          <div class="log-conn-banner d-none mt-3" id="log-conn-banner" role="status"></div>
+          <div class="position-relative mt-3" id="log-console-wrap">
+            <pre class="log-console" id="log-console" onscroll="onLogScroll()">连接中…</pre>
+            <div class="log-paused-tip d-none" id="log-paused-tip"><i class="bi bi-pause-fill me-1"></i>已暂停跟随，新日志持续缓冲中</div>
+            <button class="btn btn-sm btn-outline-secondary log-jump d-none" id="log-jump" onclick="logJumpBottom()" title="回到底部">
+              <i class="bi bi-arrow-down"></i> 回到底部
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ ◆ section-settings 设置 ═══════════ -->
+      <section id="section-settings" class="app-section d-none">
+        <div class="section-header">
+          <h4><i class="bi bi-gear me-2" style="color:var(--primary)"></i>设置</h4>
+          <div class="sub">平台模块自身配置，保存后按字段热应用或提示重启</div>
+        </div>
+        <div id="set-state"></div>
+        <div class="settings-grid mt-3 d-none" id="set-cards">
+
+          <div class="settings-card">
+            <div class="settings-card-head"><i class="bi bi-hdd-network"></i>
+              <div><div class="settings-card-title">TFTP 服务端</div><div class="settings-card-sub">在线升级源（index.json 清单）</div></div>
+            </div>
+            <div class="settings-field">
+              <label for="set-tftp-server">服务端 IP <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="set-tftp-server" placeholder="192.168.10.9">
+              <div class="invalid-feedback">请输入合法的 IPv4 地址</div>
+            </div>
+            <div class="row g-2">
+              <div class="col-6 settings-field">
+                <label for="set-tftp-port">端口 <span class="text-danger">*</span></label>
+                <input type="number" class="form-control" id="set-tftp-port" placeholder="69">
+                <div class="invalid-feedback">端口需在 1–65535 之间</div>
+              </div>
+              <div class="col-6 settings-field">
+                <label for="set-tftp-timeout">超时（秒）</label>
+                <input type="number" class="form-control" id="set-tftp-timeout" placeholder="5">
+                <div class="invalid-feedback">超时需在 1–60 秒</div>
+              </div>
+            </div>
+            <div class="row g-2">
+              <div class="col-6 settings-field">
+                <label for="set-tftp-retries">重试次数</label>
+                <input type="number" class="form-control" id="set-tftp-retries" placeholder="3">
+                <div class="invalid-feedback">重试需在 0–10 次</div>
+              </div>
+              <div class="col-6 settings-field">
+                <label for="set-tftp-index">index.json 路径</label>
+                <input type="text" class="form-control" id="set-tftp-index" placeholder="/index.json">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-head"><i class="bi bi-usb-symbol"></i>
+              <div><div class="settings-card-title">U盘策略</div><div class="settings-card-sub">离线升级目录与扫描</div></div>
+            </div>
+            <div class="settings-field">
+              <div class="settings-switch"><span>启用 U盘离线升级</span>
+                <div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" id="set-usb-enabled"></div>
+              </div>
+            </div>
+            <div class="settings-field">
+              <label for="set-usb-dir">约定目录名</label>
+              <input type="text" class="form-control" id="set-usb-dir" placeholder="upgrade">
+              <div class="invalid-feedback">约定目录名仅允许字母/数字/._-</div>
+            </div>
+            <div class="row g-2">
+              <div class="col-6 settings-field">
+                <label for="set-usb-scan">挂载点扫描间隔（秒）</label>
+                <input type="number" class="form-control" id="set-usb-scan" placeholder="5">
+                <div class="invalid-feedback">扫描间隔需在 1–60 秒</div>
+              </div>
+              <div class="col-6 settings-field">
+                <label for="set-usb-report">报告文件名</label>
+                <input type="text" class="form-control" id="set-usb-report" placeholder="report.txt">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-head"><i class="bi bi-globe"></i>
+              <div><div class="settings-card-title">Web 服务</div><div class="settings-card-sub">本管理页监听参数</div></div>
+            </div>
+            <div class="settings-field">
+              <label for="set-web-port">监听端口 <span class="text-danger">*</span> <span class="badge badge-r d-none" id="set-web-restart-badge">重启生效</span></label>
+              <input type="number" class="form-control" id="set-web-port" placeholder="8090">
+              <div class="invalid-feedback">端口需在 1–65535 之间</div>
+            </div>
+            <div class="settings-field">
+              <label for="set-web-session">会话超时（分钟）</label>
+              <input type="number" class="form-control" id="set-web-session" placeholder="30">
+              <div class="invalid-feedback">会话超时需在 5–1440 分钟</div>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-head"><i class="bi bi-journal-text"></i>
+              <div><div class="settings-card-title">日志配额</div><div class="settings-card-sub">平台日志轮转与前端缓冲</div></div>
+            </div>
+            <div class="row g-2">
+              <div class="col-6 settings-field">
+                <label for="set-log-maxmb">单文件上限（MB）</label>
+                <input type="number" class="form-control" id="set-log-maxmb" placeholder="20">
+                <div class="invalid-feedback">单文件上限需在 1–512 MB</div>
+              </div>
+              <div class="col-6 settings-field">
+                <label for="set-log-backups">保留份数</label>
+                <input type="number" class="form-control" id="set-log-backups" placeholder="5">
+                <div class="invalid-feedback">保留份数需在 1–20</div>
+              </div>
+            </div>
+            <div class="row g-2">
+              <div class="col-6 settings-field">
+                <label for="set-log-days">保留天数</label>
+                <input type="number" class="form-control" id="set-log-days" placeholder="30">
+                <div class="invalid-feedback">保留天数需在 1–365 天</div>
+              </div>
+              <div class="col-6 settings-field">
+                <label for="set-log-buffer">前端缓冲条数</label>
+                <input type="number" class="form-control" id="set-log-buffer" placeholder="2000">
+                <div class="invalid-feedback">前端缓冲需在 500–5000 行</div>
+              </div>
+            </div>
+            <div class="settings-field">
+              <label for="set-log-level">平台日志级别</label>
+              <select class="form-select" id="set-log-level">
+                <option value="debug">debug</option>
+                <option value="info">info</option>
+                <option value="warn">warn</option>
+                <option value="error">error</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-head"><i class="bi bi-graph-up-arrow"></i>
+              <div><div class="settings-card-title">采集与存储</div><div class="settings-card-sub">指标采样与版本保留</div></div>
+            </div>
+            <div class="settings-field">
+              <label for="set-collect-interval">指标采集周期（秒）</label>
+              <input type="number" class="form-control" id="set-collect-interval" placeholder="10">
+              <div class="invalid-feedback">采集周期需在 2–3600 秒</div>
+            </div>
+            <div class="settings-field">
+              <label for="set-collect-downsample">降采样策略</label>
+              <select class="form-select" id="set-collect-downsample">
+                <option value="two-level">两级（1min×24h + 5min×7d）</option>
+                <option value="short">仅短期（1min×24h）</option>
+                <option value="off">关闭（仅实时值）</option>
+              </select>
+            </div>
+            <div class="row g-2">
+              <div class="col-6 settings-field">
+                <label for="set-collect-keepversions">版本保留数</label>
+                <input type="number" class="form-control" id="set-collect-keepversions" placeholder="2">
+                <div class="invalid-feedback">版本保留数需在 1–5</div>
+              </div>
+              <div class="col-6 settings-field">
+                <label for="set-collect-dbquota">数据库配额（MB）<span class="text-muted" style="font-size:11.5px"> · 暂未生效</span></label>
+                <input type="number" class="form-control" id="set-collect-dbquota" placeholder="512">
+                <div class="invalid-feedback">数据库配额需在 64–16384 MB</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-head"><i class="bi bi-info-circle"></i>
+              <div><div class="settings-card-title">关于</div><div class="settings-card-sub">只读信息</div></div>
+            </div>
+            <dl class="settings-static">
+              <div><dt>平台版本</dt><dd id="set-about-version">—</dd></div>
+              <div><dt>构建时间</dt><dd id="set-about-build">—</dd></div>
+              <div><dt>操作系统</dt><dd id="set-about-os">—</dd></div>
+              <div><dt>系统时间</dt><dd id="set-about-time">—</dd></div>
+            </dl>
+          </div>
+        </div>
+
+        <div class="sticky-save-bar">
+          <div class="info-banner d-none" id="set-restart-banner" role="status"></div>
+          <button class="btn btn-primary text-nowrap" id="set-save" onclick="saveSettings()"><i class="bi bi-check-lg me-1"></i>保存设置</button>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+<!-- ═══════════ ⧉ service-modal（新建/编辑/详情三合一） ═══════════ -->
+<div class="modal fade" id="service-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-diagram-3 me-2" style="color:var(--primary)"></i><span id="sm-title">新建服务</span></h5>
+        <span class="badge ms-2 d-none" id="sm-state-badge"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <form id="sm-form" onsubmit="return false" autocomplete="off">
+
+          <div class="form-section-divider"><span><i class="bi bi-info-circle me-1"></i>基本信息</span></div>
+          <div class="row g-3">
+            <div class="col-md-5">
+              <label class="form-label fw-semibold" for="sm-name">服务名称 <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="sm-name" oninput="markSmNameTouched()" placeholder="如：energy-gateway（英文标识，常填可执行程序名）">
+              <div class="form-text" id="sm-name-hint">唯一标识，用作安装目录名；上传主程序后可自动填充</div>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label fw-semibold" for="sm-summary">摘要</label>
+              <input type="text" class="form-control" id="sm-summary" maxlength="40" oninput="markSmSummaryTouched()" placeholder="如：数据采集网关（简短描述，可中文）">
+              <div class="form-text">卡片上显示的名称，留空则显示服务名称；上传主程序后可自动填充</div>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label fw-semibold" for="sm-serviceType">类型</label>
+              <select class="form-select" id="sm-serviceType">
+                <option value="native">自研</option>
+                <option value="opensource">开源</option>
+              </select>
+            </div>
+            <div class="col-md-4 d-none" id="sm-version-wrap">
+              <label class="form-label fw-semibold" for="sm-version">初始版本 <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="sm-version" value="1.0.0">
+            </div>
+            <div class="col-md-5">
+              <label class="form-label fw-semibold" for="sm-webUrl">独立 Web 地址</label>
+              <input type="text" class="form-control" id="sm-webUrl" placeholder="http://192.168.10.20:8210（可选）">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-semibold" for="sm-priority">优先级</label>
+              <input type="number" class="form-control" id="sm-priority" value="100">
+              <div class="form-text">越小越先启动</div>
+            </div>
+            <div class="col-md-2 d-flex align-items-center">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="sm-enabled" checked>
+                <label class="form-check-label small" for="sm-enabled" title="关闭后不监管、不出现在运行态">启用监管</label>
+              </div>
+            </div>
+            <div class="col-md-2 d-flex align-items-center">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="sm-autoStart" checked>
+                <label class="form-check-label small" for="sm-autoStart" title="设备开机后按优先级顺序自动拉起">开机自启</label>
+              </div>
+            </div>
+          </div>
+
+          <!-- 安装文件（仅新建） -->
+          <div id="sm-files-section" class="d-none">
+            <div class="form-section-divider"><span><i class="bi bi-box-seam me-1"></i>安装文件</span></div>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label fw-semibold" for="sm-file-main">主程序 <span class="text-danger">*</span></label>
+                <input type="file" class="form-control" id="sm-file-main" onchange="onSmFilesPick('main', this)">
+                <div class="form-text" id="sm-file-main-name">可执行文件（Windows 运行选 .exe；Linux 选本机架构）</div>
+                <div class="invalid-feedback">必须选择主程序文件</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold" for="sm-file-extras">依赖文件</label>
+                <input type="file" class="form-control" id="sm-file-extras" multiple onchange="onSmFilesPick('extras', this)">
+                <div class="form-text" id="sm-file-extras-name">dll / so / 静态库等 → dependencies/ 目录</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold" for="sm-file-config">初始配置文件</label>
+                <input type="file" class="form-control" id="sm-file-config" onchange="onSmFilesPick('config', this)">
+                <div class="form-text" id="sm-file-config-name">可选 → config/ 目录，参数用 <code>-c config/文件名</code> 引用</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section-divider"><span><i class="bi bi-terminal me-1"></i>启动命令</span></div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold" for="sm-args">参数（每行一个）</label>
+              <textarea class="form-control" id="sm-args" rows="3" placeholder="-c&#10;conf/xxx.json"></textarea>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold" for="sm-env">环境变量（每行 KEY=VALUE）</label>
+              <textarea class="form-control" id="sm-env" rows="3" placeholder="CAIRN_LOG_LEVEL=info"></textarea>
+            </div>
+          </div>
+
+          <div class="form-section-divider"><span><i class="bi bi-arrow-repeat me-1"></i>重启策略</span></div>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label fw-semibold" for="sm-restartMode">异常退出后</label>
+              <select class="form-select" id="sm-restartMode" onchange="onSmRestartModeChange()">
+                <option value="backoff">退避重启（推荐）</option>
+                <option value="periodic">周期重启</option>
+              </select>
+            </div>
+            <div class="col-md-4 d-none" id="sm-periodic-wrap">
+              <label class="form-label fw-semibold" for="sm-periodicSec">固定周期</label>
+              <div class="input-group"><input type="number" class="form-control" id="sm-periodicSec" min="3" value="3"><span class="input-group-text">s</span></div>
+              <div class="form-text">最小 3s</div>
+            </div>
+            <div class="col-md-4" id="sm-backoffBase-wrap">
+              <label class="form-label fw-semibold" for="sm-backoffBase">起始间隔</label>
+              <div class="input-group"><input type="number" class="form-control" id="sm-backoffBase" min="1" value="2"><span class="input-group-text">s</span></div>
+            </div>
+            <div class="col-md-4" id="sm-backoffMax-wrap">
+              <label class="form-label fw-semibold" for="sm-backoffMax">间隔上限</label>
+              <div class="input-group"><input type="number" class="form-control" id="sm-backoffMax" min="1" value="300"><span class="input-group-text">s</span></div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold" for="sm-maxRetries">窗口内最大重试</label>
+              <div class="input-group"><input type="number" class="form-control" id="sm-maxRetries" min="0" value="0"><span class="input-group-text">次</span></div>
+              <div class="form-text">0 = 不限，用尽熔断</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold" for="sm-windowSec">熔断窗口</label>
+              <div class="input-group"><input type="number" class="form-control" id="sm-windowSec" min="0" value="0"><span class="input-group-text">s</span></div>
+              <div class="form-text">0 = 不限</div>
+            </div>
+          </div>
+
+          <div class="form-section-divider"><span><i class="bi bi-journal-text me-1"></i>日志策略</span></div>
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label class="form-label fw-semibold" for="sm-logMode">方式</label>
+              <select class="form-select" id="sm-logMode" onchange="onSmLogModeChange()">
+                <option value="stdout">标准输出</option>
+                <option value="file">文件</option>
+              </select>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label fw-semibold" for="sm-logPath">日志路径</label>
+              <input type="text" class="form-control" id="sm-logPath" disabled placeholder="标准输出由平台统一收集">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label fw-semibold" for="sm-logMaxSizeMB">单文件上限</label>
+              <div class="input-group"><input type="number" class="form-control" id="sm-logMaxSizeMB" min="1" value="10"><span class="input-group-text">MB</span></div>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label fw-semibold" for="sm-logMaxBackups">保留份数</label>
+              <input type="number" class="form-control" id="sm-logMaxBackups" min="1" value="3">
+            </div>
+          </div>
+
+          <div id="sm-stats" class="d-none">
+            <div class="form-section-divider"><span><i class="bi bi-activity me-1"></i>运行统计（只读）</span></div>
+            <div class="row g-2" id="sm-stats-body"></div>
+          </div>
+
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" onclick="closeServiceModal()"><i class="bi bi-x-lg me-1"></i>关闭</button>
+        <button class="btn btn-outline-secondary" id="sm-export" onclick="exportSvcManifest(state.editingServiceId)" title="导出说明卡（manifest.json）">
+          <i class="bi bi-box-arrow-up me-1"></i>导出说明卡
+        </button>
+        <button class="btn btn-outline-primary" id="sm-open-cf" onclick="openConfigfile()" title="打开配置文件编辑器">
+          <i class="bi bi-file-earmark-code me-1"></i>配置文件
+        </button>
+        <button class="btn btn-primary" id="sm-save" onclick="saveService()"><i class="bi bi-check-lg me-1"></i>保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- ═══════════ ⧉ configfile-modal（配置文件编辑） ═══════════ -->
+<div class="modal fade" id="configfile-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-file-earmark-code me-2" style="color:var(--primary)"></i>配置文件编辑 · <span id="cf-svc-name">—</span></h5>
+        <span class="badge badge-r ms-2" id="cf-path" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;">—</span>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+          <button class="btn btn-outline-secondary btn-sm" id="cf-validate" onclick="cfValidate()" title="执行该服务 validateCmd（不落盘）">
+            <i class="bi bi-check2-square me-1"></i>校验
+          </button>
+          <span class="small" style="color:var(--muted-color)" id="cf-status">就绪</span>
+          <span class="ms-auto badge badge-r d-none" id="cf-dirty">未保存更改</span>
+        </div>
+        <div id="cf-state"></div>
+        <textarea class="code-editor" id="cf-editor" spellcheck="false" oninput="onCfInput()" onkeydown="return onCfKeydown(event)" aria-label="配置文件编辑器"></textarea>
+        <pre class="code-preview d-none mt-3" id="cf-out"></pre>
+        <div class="form-section-divider mt-4"><span><i class="bi bi-clock-history me-1"></i>版本历史（保存自动备份）</span></div>
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead><tr><th>时间</th><th>操作者</th><th class="num-cell">字节数</th><th class="text-end">操作</th></tr></thead>
+            <tbody id="cf-history-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" onclick="closeConfigfile()"><i class="bi bi-x-lg me-1"></i>关闭</button>
+        <button class="btn btn-outline-primary" id="cf-save" onclick="cfSave(false)"><i class="bi bi-database-check me-1"></i>保存</button>
+        <button class="btn btn-primary" id="cf-apply" onclick="cfSave(true)"><i class="bi bi-check-lg me-1"></i>保存并生效</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- ═══════════ ⧉ log-export-modal（日志导出参数） ═══════════ -->
+<div class="modal fade" id="log-export-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-download me-2" style="color:var(--primary)"></i>导出日志</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold" for="le-service">服务</label>
+          <select class="form-select" id="le-service"></select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label fw-semibold" for="le-range">时间范围</label>
+          <select class="form-select" id="le-range" onchange="onLeRangeChange()">
+            <option value="1h">近 1 小时</option>
+            <option value="6h">近 6 小时</option>
+            <option value="24h">近 24 小时</option>
+            <option value="today">今天</option>
+            <option value="custom">自定义起止</option>
+          </select>
+        </div>
+        <div class="row g-2 d-none" id="le-custom">
+          <div class="col-6"><input type="datetime-local" class="form-control" id="le-from" aria-label="开始时间"></div>
+          <div class="col-6"><input type="datetime-local" class="form-control" id="le-to" aria-label="结束时间"></div>
+        </div>
+        <div class="form-text mt-2"><i class="bi bi-info-circle me-1"></i>导出由服务端按所选范围打包为 ZIP 下载，<b>不依赖面板缓冲与当前 SSE 连接</b>。</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" id="le-confirm" onclick="doLogExport()"><i class="bi bi-download me-1"></i>导出 ZIP</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ ⧉ install-modal（市场安装：manifest 预填 + 参数覆盖 + 预检） ═══════════ -->
+<div class="modal fade" id="install-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-box-seam me-2" style="color:var(--primary)"></i>安装 · <span id="im-name">—</span> <span class="badge badge-plain ms-1" id="im-version">—</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <!-- 清单说明区（只读） -->
+        <div class="d-flex align-items-start flex-wrap mb-3" style="gap:10px;">
+          <div class="text-muted small flex-grow-1" id="im-desc" style="min-width:240px;line-height:1.6;">—</div>
+          <div class="text-end small text-muted">
+            <div><i class="bi bi-person me-1"></i><span id="im-author">—</span></div>
+            <div class="mt-1"><i class="bi bi-tag me-1"></i><span id="im-tags">—</span></div>
+          </div>
+        </div>
+        <div class="info-banner mb-3" id="im-dep-banner" role="status"></div>
+
+        <!-- 运行参数覆盖 -->
+        <div class="form-section-divider"><span><i class="bi bi-sliders me-1"></i>运行参数（可覆盖清单默认值）</span></div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="im-args">参数（每行一个）</label>
+            <textarea class="form-control" id="im-args" rows="3"></textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="im-env">环境变量（每行 KEY=VALUE）</label>
+            <textarea class="form-control" id="im-env" rows="3"></textarea>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">开机自启</label>
+            <div class="form-check form-switch ms-1 mt-2">
+              <input class="form-check-input" type="checkbox" id="im-autoStart" checked>
+              <label class="form-check-label small" for="im-autoStart">autoStart（按依赖拓扑序拉起）</label>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">安装后启用监管</label>
+            <div class="form-check form-switch ms-1 mt-2">
+              <input class="form-check-input" type="checkbox" id="im-enabled" checked>
+              <label class="form-check-label small" for="im-enabled">enabled</label>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="im-priority">优先级</label>
+            <input type="number" class="form-control" id="im-priority" value="100">
+            <div class="form-text">数值越小越先启动</div>
+          </div>
+        </div>
+
+        <!-- 预检结果 -->
+        <div class="form-section-divider"><span><i class="bi bi-shield-check me-1"></i>安装预检</span></div>
+        <div id="im-precheck"><div class="text-muted small">点击「预检并安装」后显示检查结果</div></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" id="im-confirm" onclick="doInstall()"><i class="bi bi-check-lg me-1"></i>预检并安装</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ ⧉ upgrade-source-modal（升级来源选择：OTA / OTG / LOCAL） ═══════════ -->
+<div class="modal fade" id="upgrade-source-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-cloud-arrow-up me-2" style="color:var(--primary)"></i>升级 · <span id="us-svc">—</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-tabs mb-3" role="tablist">
+          <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#us-ota" type="button" role="tab"><i class="bi bi-broadcast me-1"></i>OTA 远程</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#us-otg" type="button" role="tab"><i class="bi bi-usb-symbol me-1"></i>OTG U盘</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#us-local" type="button" role="tab"><i class="bi bi-hdd me-1"></i>LOCAL 本地</button></li>
+        </ul>
+        <div class="tab-content">
+          <div class="tab-pane fade show active" id="us-ota" role="tabpanel"><div id="us-ota-body"></div></div>
+          <div class="tab-pane fade" id="us-otg" role="tabpanel"><div id="us-otg-body"></div></div>
+          <div class="tab-pane fade" id="us-local" role="tabpanel"><div id="us-local-body"></div></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" data-bs-dismiss="modal">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ ⧉ upgrade-modal（升级进度/结果，进行中 static） ═══════════ -->
+<div class="modal fade" id="upgrade-modal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-cloud-arrow-down me-2" style="color:var(--primary)"></i>升级 · <span id="um-svc">—</span></h5>
+      </div>
+      <div class="modal-body">
+        <div class="um-batch-title d-none" id="um-batch"><span id="um-batch-text"></span></div>
+        <ul class="update-phase-list" id="um-phases"></ul>
+        <div class="mt-3 d-none" id="um-progress-wrap">
+          <div class="progress" style="height:16px;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" id="um-progress-bar" style="width:0%"></div>
+          </div>
+          <div class="small mt-1 text-end" style="color:var(--muted-color)" id="um-progress-text"></div>
+        </div>
+        <div class="mt-3 d-none" id="um-result"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-light" id="um-bg" onclick="upgradeBgContinue()"><i class="bi bi-eye-slash me-1"></i>后台继续</button>
+        <button class="btn btn-primary d-none" id="um-close" onclick="closeUpgradeModal()"><i class="bi bi-check-lg me-1"></i>关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ ⧉ confirm-modal（统一确认弹窗单例 L1/L2） ═══════════ -->
+<div class="modal fade" id="confirm-modal" tabindex="-1" data-bs-backdrop="static" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="cm-title">确认</h5>
+      </div>
+      <div class="modal-body" id="cm-body" style="font-size:13.5px;line-height:1.6;"></div>
+      <div class="modal-footer">
+        <button class="btn btn-light" id="cm-cancel" onclick="_confirmDone(false)">取消</button>
+        <button class="btn btn-primary" id="cm-confirm" onclick="_confirmDone(true)">确认</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast 容器（右上角） -->
+<div class="toast-container position-fixed top-0 end-0 p-3" id="toast-box" style="z-index:2100"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<!-- 加载顺序：constants → helpers → api → 各业务模块 → main（永远最后） -->
+<script src="js/constants.js"></script>
+<script src="js/helpers.js"></script>
+<script src="js/api.js"></script>
+<script src="js/dash.js"></script>
+<script src="js/service.js"></script>
+<script src="js/configfile.js"></script>
+<script src="js/market.js"></script>
+<script src="js/log.js"></script>
+<script src="js/update.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
