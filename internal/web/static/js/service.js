@@ -159,10 +159,10 @@ function cardHtml(s) {
   const titleHtml = s.webUrl
     ? '<a class="svc-name-link" href="' + escapeHtml(s.webUrl) + '" target="_blank" rel="noopener" title="穿越到 ' + escapeHtml(s.webUrl) + '"><span class="led ' + meta.led + '"></span>' + escapeHtml(title) + '<i class="bi bi-box-arrow-up-right ms-1"></i></a>'
     : '<span class="led ' + meta.led + '"></span>' + escapeHtml(title);
-  const avail = state.update.available[s.id];
+  const avail = state.update.available[s.name]; /* available 以服务名为键（新版 check 协议） */
   const hasWeb = !!s.webUrl;
   const hasCfg = !!(s.configFile && s.configFile.path);
-  let actions = btn(0, 'bi-cloud-arrow-up' + (avail ? '-fill' : ''), avail ? '升级（可用 ' + avail.version + '）' : '升级（OTA / OTG / LOCAL）', 'openUpgradeSource(' + s.id + ')', !locked, 'btn-outline-primary');
+  let actions = btn(0, 'bi-cloud-arrow-up' + (avail ? '-fill' : ''), avail ? '升级（最新 ' + avail.latest + '）' : '升级（OTA / 本地包）', 'openUpgradeSource(' + s.id + ')', !locked, 'btn-outline-primary');
   actions += btn(0, 'bi-trash', '卸载（停止并移除纳管）', 'svcUninstall(' + s.id + ', this)', true, 'btn-outline-danger');
   actions += btn(0, hasWeb ? 'bi-window' : 'bi-file-earmark-code', hasWeb ? '配置（穿越服务 Web）' : hasCfg ? '配置（编辑配置文件）' : '配置（未配置）', 'svcConfig(' + s.id + ')', hasWeb || hasCfg);
   actions += btn(0, 'bi-sliders', '详情', 'openServiceModal(' + s.id + ')', true, 'btn-outline-primary');
@@ -171,6 +171,9 @@ function cardHtml(s) {
     actions += btn(0, 'bi-stop-fill', '停止', 'svcStopFlow(' + s.id + ')', !busy && runningIsh && !locked);
     actions += btn(0, 'bi-arrow-repeat', '重启', 'svcRestartFlow(' + s.id + ')', !busy && !locked, 'btn-outline-primary');
   }
+  // 导出软件包（重启后）：把当前产物+清单打成 .cairnpkg 下载，可用于本机重装、
+  // 回退（换设备/换版本）或发布到 OTA 服务器。禁用态服务同样可导出。
+  actions += btn(0, 'bi-box-arrow-up', '导出软件包（.cairnpkg）', 'exportSvcPkg(' + s.id + ', this)', true, 'btn-outline-secondary');
   return '<div class="col-md-6 col-lg-4">' +
     '<div class="model-card' + (disabled ? ' svc-disabled' : '') + '" id="svc-card-' + s.id + '">' +
     '<div class="model-card-top">' +
@@ -609,6 +612,35 @@ async function svcUninstall(id, btn) {
   } catch (e) {
     showToast('danger', '卸载失败：' + e.message);
     if (btn) btnIdle(btn);
+  }
+}
+
+/* ── 导出软件包：当前产物 + 清单快照 → .cairnpkg 下载 ── */
+/* 导出的包与手工打包完全同构：可本机重装、发到 OTA 服务器分发、或用于回退。 */
+async function exportSvcPkg(id, btnEl) {
+  const row = svcById(id);
+  if (!row) return;
+  if (btnEl) btnBusy(btnEl, '导出中…');
+  try {
+    const r = await fetch('/api/services/' + id + '/export');
+    if (!r.ok) {
+      let msg = 'HTTP ' + r.status;
+      try { const j = await r.json(); if (j && j.msg) msg = j.msg; } catch (e) { }
+      showToast('danger', '导出失败：' + msg);
+      return;
+    }
+    const blob = await r.blob();
+    // 文件名优先取服务端 Content-Disposition（含规范四元组），兜底自拼。
+    let name = row.name + '-' + (row.version || 'pkg') + '.cairnpkg';
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = /filename="?([^";]+)"?/.exec(cd);
+    if (m) name = m[1];
+    downloadBlob(blob, name);
+    showToast('success', '软件包已导出：' + name);
+  } catch (e) {
+    showToast('danger', '导出失败：' + e.message);
+  } finally {
+    if (btnEl) btnIdle(btnEl);
   }
 }
 

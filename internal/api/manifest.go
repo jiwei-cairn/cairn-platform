@@ -36,6 +36,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	goruntime "runtime"
@@ -55,26 +56,8 @@ func (s *Server) installRoot() string {
 	return config.ServicesDir(goruntime.GOOS, goruntime.GOARCH)
 }
 
-// switchCurrentLink 版本切换软链（仅 Linux：tmp symlink + rename 原子切换）。
-// Windows 无符号链接特权：不建链，DB 的 ServiceVersion.Active 为权威，
-// exePath 指向具体版本目录，fork 拉起天然正确；current.txt 仅作人读指针。
-func (s *Server) switchCurrentLink(name, version string) {
-	if goruntime.GOOS == "windows" {
-		_ = os.WriteFile(filepath.Join(s.installRoot(), name, "current.txt"), []byte(version+"\n"), 0o644)
-		return
-	}
-	svcDir := filepath.Join(s.installRoot(), name)
-	tmp := filepath.Join(svcDir, ".current.tmp")
-	_ = os.Remove(tmp)
-	if err := os.Symlink(version, tmp); err != nil {
-		logx.Module("api").Warn("创建版本软链失败", "svc", name, "err", err)
-		return
-	}
-	if err := os.Rename(tmp, filepath.Join(svcDir, "current")); err != nil {
-		logx.Module("api").Warn("切换 current 软链失败", "svc", name, "err", err)
-		_ = os.Remove(tmp)
-	}
-}
+// switchCurrentLink 已随版本目录布局一并移除：覆盖式升级（decisions.md D5）
+// 下安装路径恒定，无 current 软链切换。
 
 // ServiceManifest 是安装包的说明文档（service manifest）。
 // 字段与市场目录条目同构：一份 schema 两处消费（打包随包分发 / 市场镜像）。
@@ -202,7 +185,10 @@ func (s *Server) validateManifest(m *ServiceManifest, ov installOverrides) []ins
 	}
 	// 客户端回传的暂存路径必须落在服务端上传暂存目录内：否则可把
 	// data/cairn.db、系统任意文件复制进服务仓库（V1 无认证，危害放大）。
-	upBase := filepath.Clean(config.UploadsDir())
+	// 基准与回传路径必须同为绝对形态再比对：开发形态（Root() 回落 CWD）下
+	// UploadsDir() 返回相对路径，若只 Abs 化回传侧，合法暂存回传会被
+	// filepath.Rel 误判越界（实测触发于 go run / 仓库目录直跑）。
+	upBase, _ := filepath.Abs(config.UploadsDir())
 	for _, f := range append([]string{ov.LocalBinary, ov.InitialConfig}, ov.ExtraBinaries...) {
 		if strings.TrimSpace(f) == "" {
 			continue
@@ -337,7 +323,7 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── 落盘：{root}/{name}/{version}/ + manifest.json 留存（统一说明卡）──
+	// ── 落盘：{root}/{name}/ + manifest.json 留存（扁平布局，覆盖式升级）──
 	source := strings.TrimSpace(req.Source)
 	if source == "" {
 		source = "market"
@@ -346,7 +332,9 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 	if external != "" {
 		m.ExternalRef = true // 说明卡标记：产物不入仓，引用外部路径
 	}
-	dir := filepath.Join(s.installRoot(), m.Name, m.Version)
+	// 覆盖式升级（decisions.md D5/P1）：安装目录不含版本层，路径恒定；
+	// 服务运行数据在 data/{name}（P2），与产物目录彻底分离。
+	dir := filepath.Join(s.installRoot(), m.Name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fail(w, http.StatusInternalServerError, "创建安装目录失败: "+err.Error())
 		return
@@ -427,10 +415,9 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 		}
 		cfgPath = filepath.Join(confDir, filepath.Base(cfg))
 	}
-	// 工作目录缺省 = 版本目录（安装产物与配置的相对引用基准）。
-	if strings.TrimSpace(m.WorkDir) == "" {
-		m.WorkDir = dir
-	}
+	// 工作目录 = 数据目录（data/{name}）：升级覆盖产物目录时，服务运行
+	// 产生的 .db/.log 等过程文件不受影响（decisions.md E2/P2）。
+	m.WorkDir = config.DataDir(m.Name)
 
 	// ── 依赖名 → id ──
 	dependsOn := make([]int, 0, len(m.Deps))
@@ -471,11 +458,12 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 		env = req.Overrides.Env
 	}
 	def := store.Service{
-		Name: m.Name, Summary: manifestSummary(m), ServiceType: m.ServiceType, WebUrl: strings.TrimSpace(m.WebUrl),
+		Name: m.Name, Version: m.Version, Summary: manifestSummary(m), ServiceType: m.ServiceType, WebUrl: strings.TrimSpace(m.WebUrl),
 		ExePath: binPath, WorkDir: m.WorkDir,
 		Args: mustJSON(nonNil(args)), Env: mustJSON(env), DependsOn: mustJSON(dependsOn),
 		Enabled: enabled, AutoStart: req.Overrides.AutoStart,
 		Priority: req.Overrides.Priority,
+		InstalledAt: time.Now(),
 	}
 	def.RestartPolicy, def.HealthCheck, def.ConfigFile, def.LogPolicy = defaultPolicyBlobs()
 	if cfgPath != "" {
@@ -494,33 +482,22 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 	if len(m.LogPolicy) > 0 && string(m.LogPolicy) != "null" {
 		def.LogPolicy = datatypesJSON(m.LogPolicy)
 	}
-	// ── DB 落库（事务）：服务定义 + 版本台账同生共死 ──
-	// 二者其一失败都会留下不可用状态（有目录无台账 / 有定义无产物），
-	// 故置于同一事务，失败时回滚已有目录，避免重装被名称冲突预检挡住。
-	sv := store.ServiceVersion{
-		Version: m.Version, DirPath: dir,
-		SizeBytes: int64(len(manifestRaw)), Manifest: datatypesJSON(manifestRaw),
-		Active: true,
-	}
-	if err := s.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&def).Error; err != nil {
-			return fmt.Errorf("保存服务定义失败: %w", err)
-		}
-		sv.ServiceID = def.ID
-		if err := tx.Create(&sv).Error; err != nil {
-			return fmt.Errorf("写入版本台账失败: %w", err)
-		}
-		return nil
-	}); err != nil {
+	// ── DB 落库：覆盖式布局下版本即 Service 行的字段（P4：无多版本台账）。
+	// manifest 快照随行留存（导出/排障用），失败回滚目录防重装被名称冲突挡住。
+	def.Manifest = datatypesJSON(manifestRaw)
+	if err := s.DB.Save(&def).Error; err != nil {
 		s.rollbackInstallDir(dir)
-		fail(w, http.StatusInternalServerError, err.Error())
+		fail(w, http.StatusInternalServerError, "保存服务定义失败: "+err.Error())
 		return
 	}
 
 	if s.Defs != nil {
 		s.Defs.OnDefsSaved(def)
 	}
-	s.switchCurrentLink(m.Name, m.Version)
+	// 数据目录随装创建（空目录即可，服务自行填充）。
+	if err := os.MkdirAll(m.WorkDir, 0o755); err != nil {
+		logx.Module("api").Warn("创建数据目录失败", "dir", m.WorkDir, "err", err)
+	}
 	// 清理本次安装引用的上传暂存目录（防磁盘累积）。
 	s.cleanUploads(req.Overrides)
 	logx.Module("api").Info("安装服务", "id", def.ID, "name", def.Name, "version", m.Version, "dir", dir, "source", source)
@@ -562,8 +539,8 @@ func pathWithin(parent, child string) bool {
 }
 
 // ExportManifest GET /api/services/{id}/manifest：导出服务说明卡（manifest）。
-// 优先返回版本台账留存的安装时点说明卡（不可变快照）；无台账（历史数据）时
-// 从当前 Service 定义合成。用途：提交开放平台上架 / 备份 / 跨设备迁移。
+// 覆盖式布局：安装时点快照随 Service 行留存；无快照（历史数据）时从
+// 当前定义合成。用途：提交开放平台上架 / 备份 / 跨设备迁移。
 func (s *Server) ExportManifest(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
@@ -579,12 +556,11 @@ func (s *Server) ExportManifest(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// 优先：active 版本台账留存的说明卡（安装时点快照，与落盘文件一致）。
-	var sv store.ServiceVersion
-	if err := s.DB.First(&sv, "service_id = ? AND active = ?", id, true).Error; err == nil && len(sv.Manifest) > 0 {
+	// 优先：安装时点快照（与落盘 manifest.json 一致）。
+	if len(def.Manifest) > 0 {
 		var out json.RawMessage
-		if json.Unmarshal(sv.Manifest, &out) == nil {
-			ok(w, map[string]any{"manifest": &out, "version": sv.Version, "origin": "installed"})
+		if json.Unmarshal(def.Manifest, &out) == nil {
+			ok(w, map[string]any{"manifest": &out, "version": def.Version, "origin": "installed"})
 			return
 		}
 	}

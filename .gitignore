@@ -1,14 +1,22 @@
-
+# ---- 平台运行产物（数据根默认落在仓库根时产生，不入库）----
 /data/
 /logs/
 /services/
 /smoke/
+/smoke-t/
 *.db
 *.db-shm
 *.db-wal
-*_test.go
 
-# Go
+# ---- 开发/测试临时目录（验证服务器根、演示包、E2E 残留）----
+# ota-root 不锚定根目录：devserver 可在任意 CWD 启动（默认相对路径）。
+ota-root/
+/demo-pkg/
+/otatest/
+/qtest/
+/tmp-*/
+*_test.go
+# ---- Go ----
 *.exe
 *.exe~
 *.dll
@@ -19,7 +27,7 @@
 bin/
 dist/
 
-# C / C++
+# ---- C / C++ ----
 *.o
 *.obj
 *.a
@@ -27,11 +35,11 @@ dist/
 build/
 cmake-build-*/
 
-# IDE / 编辑器
+# ---- IDE / 编辑器 ----
 .idea/
 .vscode/
 *.swp
 
-# 系统文件
+# ---- 系统文件 ----
 .DS_Store
 Thumbs.db

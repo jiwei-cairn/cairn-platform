@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"unicode/utf8"
 
@@ -18,7 +17,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// versionView 是 retainedVersions 数组元素。
+// versionView 是 retainedVersions 数组元素（覆盖式升级下恒为一条：当前版本，
+// 保留数组形状以兼容前端消费）。
 type versionView struct {
 	Version     string `json:"version"`
 	Active      bool   `json:"active"`
@@ -63,14 +63,6 @@ func (s *Server) serviceRows() []serviceRow {
 		logx.Module("api").Warn("读取服务定义失败", "err", err)
 		return nil
 	}
-	var versions []store.ServiceVersion
-	if err := s.DB.Order("installed_at desc").Find(&versions).Error; err != nil {
-		logx.Module("api").Warn("读取版本表失败", "err", err)
-	}
-	versBySvc := make(map[int][]store.ServiceVersion)
-	for _, v := range versions {
-		versBySvc[v.ServiceID] = append(versBySvc[v.ServiceID], v)
-	}
 	var states map[int]RunState
 	if s.Supervisor != nil {
 		states = s.Supervisor.States()
@@ -82,12 +74,12 @@ func (s *Server) serviceRows() []serviceRow {
 
 	rows := make([]serviceRow, 0, len(defs))
 	for _, d := range defs {
-		rows = append(rows, buildServiceRow(d, versBySvc[d.ID], states, names))
+		rows = append(rows, buildServiceRow(d, states, names))
 	}
 	return rows
 }
 
-func buildServiceRow(d store.Service, versions []store.ServiceVersion, states map[int]RunState, names map[int]string) serviceRow {
+func buildServiceRow(d store.Service, states map[int]RunState, names map[int]string) serviceRow {
 	row := serviceRow{
 		ID: d.ID, Name: d.Name, Summary: d.Summary, ServiceType: d.ServiceType, WebUrl: d.WebUrl,
 		ExePath: d.ExePath, WorkDir: d.WorkDir, Enabled: d.Enabled, AutoStart: d.AutoStart,
@@ -113,24 +105,17 @@ func buildServiceRow(d store.Service, versions []store.ServiceVersion, states ma
 	row.ConfigFile = json.RawMessage(d.ConfigFile)
 	row.LogPolicy = json.RawMessage(d.LogPolicy)
 
-	for _, v := range versions {
-		view := versionView{Version: v.Version, Active: v.Active, InstalledAt: v.InstalledAt.UnixMilli()}
-		if v.Active {
-			row.Version = v.Version
-			var m manifestView
-			if json.Unmarshal(v.Manifest, &m) == nil {
-				row.InstallSource = m.Source
-			}
+	// 覆盖式升级（decisions.md D5）：只有当前版本一条记录。
+	row.Version = d.Version
+	if d.Version != "" {
+		var m manifestView
+		if json.Unmarshal(d.Manifest, &m) == nil {
+			row.InstallSource = m.Source
 		}
-		row.RetainedVersions = append(row.RetainedVersions, view)
+		row.RetainedVersions = append(row.RetainedVersions, versionView{
+			Version: d.Version, Active: true, InstalledAt: d.InstalledAt.UnixMilli(),
+		})
 	}
-	// active 优先，其次安装时间倒序（与前端“当前 + 上一版”的展示一致）。
-	sort.SliceStable(row.RetainedVersions, func(i, j int) bool {
-		if row.RetainedVersions[i].Active != row.RetainedVersions[j].Active {
-			return row.RetainedVersions[i].Active
-		}
-		return row.RetainedVersions[i].InstalledAt > row.RetainedVersions[j].InstalledAt
-	})
 
 	if states != nil {
 		if rt, ok := states[d.ID]; ok {
@@ -376,7 +361,6 @@ func (s *Server) purgeServiceArtifacts(id int, name string) {
 		model any
 		desc  string
 	}{
-		{&store.ServiceVersion{}, "版本台账"},
 		{&store.ServiceRuntime{}, "运行态"},
 		{&store.MetricPoint{}, "指标点"},
 	} {

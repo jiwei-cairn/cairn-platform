@@ -17,8 +17,7 @@ import (
 
 // App 平台配置根节点。
 type App struct {
-	TFTP     TFTP     `json:"tftp"`
-	USB      USB      `json:"usb"`
+	OTA      OTA      `json:"ota"`
 	Web      Web      `json:"web"`
 	LogQuota LogQuota `json:"logQuota"`
 	Collect  Collect  `json:"collect"`
@@ -155,21 +154,11 @@ func rootJoin(head string, parts ...string) string {
 	return filepath.Join(all...)
 }
 
-// TFTP 升级服务端（OTA 通道，M2 接入 pin/tftp/v3）。
-type TFTP struct {
-	Server        string `json:"server"`        // 服务端 IPv4
-	Port          int    `json:"port"`          // 默认 69
-	TimeoutSec    int    `json:"timeoutSec"`    // 传输超时（1–60s）
-	Retries       int    `json:"retries"`       // 重试次数（0–10）
-	IndexJSONPath string `json:"indexJsonPath"` // 版本清单路径
-}
-
-// USB U盘升级策略（OTG 通道）。
-type USB struct {
-	Enabled         bool   `json:"enabled"`
-	UpgradeDir      string `json:"upgradeDir"`      // 约定子目录名（仅字母/数字/._-）
-	ReportName      string `json:"reportName"`      // 升级结果写回文件名
-	ScanIntervalSec int    `json:"scanIntervalSec"` // 挂载检测周期（M2 fsnotify）
+// OTA 远程升级（Pull 模式，静态文件托管，decisions.md B1-B8）。
+// 服务器目录规范见 docs/upgrade/ota-server.md。
+type OTA struct {
+	ServerURL  string `json:"serverUrl"`  // 服务器基址，如 http://192.168.1.10:8090；空 = 未启用 OTA（出厂默认）
+	TimeoutSec int    `json:"timeoutSec"` // 拉清单/下载超时（5–120s）
 }
 
 // Web 平台 Web 服务。
@@ -205,11 +194,7 @@ type Issue struct {
 // Default 返回内置默认配置（首启写入 Setting 表的快照）。
 func Default() App {
 	return App{
-		TFTP: TFTP{
-			Server: "", Port: 69, TimeoutSec: 5, Retries: 3,
-			IndexJSONPath: "/index.json",
-		},
-		USB:      USB{Enabled: true, UpgradeDir: "upgrade", ReportName: "report.txt", ScanIntervalSec: 5},
+		OTA:      OTA{ServerURL: "", TimeoutSec: 30},
 		Web:      Web{Port: 1995, SessionTimeoutMin: 30},
 		LogQuota: LogQuota{PlatformMaxMB: 20, PlatformMaxBackups: 5, RetentionDays: 30, BufferLines: 2000, Level: "info"},
 		Collect:  Collect{IntervalSec: 10, Downsample: "two-level", KeepVersions: 2, DBQuotaMB: 512},
@@ -217,8 +202,7 @@ func Default() App {
 }
 
 var (
-	ipv4Pattern     = regexp.MustCompile(`^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$`)
-	upgradeDirChars = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+	otaURLPattern = regexp.MustCompile(`^https?://[A-Za-z0-9.:-]+(:[0-9]{1,5})?(/[A-Za-z0-9._/-]*)?$`)
 )
 
 // Validate 逐字段校验，规则与前端 validateSettings 保持一致（后端二次校验），
@@ -232,21 +216,14 @@ func Validate(app App) []Issue {
 		}
 	}
 
-	// TFTP 服务端：空 = 未启用 OTA（出厂默认，避免硬编码内网地址）；
-	// 一旦填写即必须是合法 IPv4（M2 升级管线启用前由用户显式配置）。
-	if server := strings.TrimSpace(app.TFTP.Server); server != "" {
-		if m := ipv4Pattern.FindStringSubmatch(server); m == nil ||
-			parseOctet(m[1]) > 255 || parseOctet(m[2]) > 255 || parseOctet(m[3]) > 255 || parseOctet(m[4]) > 255 {
-			add("tftp.server", "不是合法的 IPv4 地址")
+	// OTA 服务端：空 = 未启用远程升级（出厂默认，避免硬编码内网地址）；
+	// 一旦填写必须是 http(s):// 基址（不带尾斜杠，路径 /cairn/ 由平台拼接）。
+	if u := strings.TrimSpace(app.OTA.ServerURL); u != "" {
+		if !otaURLPattern.MatchString(u) {
+			add("ota.serverUrl", "必须是 http:// 或 https:// 开头的基址（不含 /cairn 路径与尾斜杠）")
 		}
 	}
-	rangeIssue("tftp.port", app.TFTP.Port >= 1 && app.TFTP.Port <= 65535, "端口需在 1–65535 之间")
-	rangeIssue("tftp.timeoutSec", app.TFTP.TimeoutSec >= 1 && app.TFTP.TimeoutSec <= 60, "超时需在 1–60 秒")
-	rangeIssue("tftp.retries", app.TFTP.Retries >= 0 && app.TFTP.Retries <= 10, "重试需在 0–10 次")
-	if !upgradeDirChars.MatchString(strings.TrimSpace(app.USB.UpgradeDir)) {
-		add("usb.upgradeDir", "约定目录名仅允许字母/数字/._-")
-	}
-	rangeIssue("usb.scanIntervalSec", app.USB.ScanIntervalSec >= 1 && app.USB.ScanIntervalSec <= 60, "扫描间隔需在 1–60 秒")
+	rangeIssue("ota.timeoutSec", app.OTA.TimeoutSec >= 5 && app.OTA.TimeoutSec <= 120, "OTA 超时需在 5–120 秒")
 	rangeIssue("web.port", app.Web.Port >= 1 && app.Web.Port <= 65535, "端口需在 1–65535 之间")
 	rangeIssue("web.sessionTimeoutMin", app.Web.SessionTimeoutMin >= 5 && app.Web.SessionTimeoutMin <= 1440, "会话超时需在 5–1440 分钟")
 	rangeIssue("logQuota.platformMaxMB", app.LogQuota.PlatformMaxMB >= 1 && app.LogQuota.PlatformMaxMB <= 512, "单文件上限需在 1–512 MB")

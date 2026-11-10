@@ -186,9 +186,12 @@ type Server struct {
 	// Host 大盘主机资源概览源（demo 随机游走 / 真实 /proc 读取）。
 	Host HostSource
 
-	RuntimeName string    // "fake" | "fork"
-	Mock        bool      // true = 演示数据角标
+	RuntimeName string    // "fork"
+	Mock        bool      // 兼容字段（demo 已退役，恒 false）
 	StartedAt   time.Time // 平台自身启动时间
+
+	// Tasks 升级任务队列（全局串行，decisions.md D7）。
+	Tasks *taskManager
 }
 
 // DefsHook 服务定义变更钩子：API 写路径（保存/安装/删除）完成后通知，
@@ -210,7 +213,7 @@ type HostSource interface {
 
 // New 构造基础 Server（无演示引擎；服务定义 CRUD/设置/版本仍可用）。
 func New(db *gorm.DB, settings *store.SettingsStore, startedAt time.Time) *Server {
-	return &Server{DB: db, Settings: settings, StartedAt: startedAt}
+	return &Server{DB: db, Settings: settings, StartedAt: startedAt, Tasks: newTaskManager()}
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

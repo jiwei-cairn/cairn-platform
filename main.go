@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -73,6 +74,8 @@ func main() {
 	// 可能是 System32 等无关位置，按 CWD 相对路径取卷会读错盘。
 	hostmetrics.SetDataDir(config.DataDir())
 	eng.Init()
+	// 升级中断恢复：清理断电残留的 .staging/.old（decisions.md §11）。
+	server.RecoverInterruptedDeploys()
 	// 主机指标采样：供大盘 sparkline（近 1h 趋势）。节奏取设置项，
 	// 采样器自身对误配做过下限保护，失败不影响服务监管。
 	server.StartHostSampler(settings.Get().Collect.IntervalSec)
@@ -84,14 +87,26 @@ func main() {
 		// 并在网络层自行收敛访问范围。
 		listen = fmt.Sprintf("127.0.0.1:%d", settings.Get().Web.Port)
 	}
-	httpSrv := &http.Server{Addr: listen, Handler: web.Router(server)}
+	httpSrv := &http.Server{Handler: web.Router(server)}
 
-	// 监听失败经通道回传主流程统一收尾——goroutine 内直接 os.Exit 会跳过
-	// 引擎关闭、DB 落盘与日志 flush（端口占用是现场高频错误，必须干净退出）。
+	// 端口预绑定：失败时给出可操作的占用诊断（go run 的孤儿实例是常见元凶），
+	// 并走统一收尾链（引擎/DB/日志），而非 goroutine 内裸 os.Exit。
+	ln, listenErr := net.Listen("tcp", listen)
+	if listenErr != nil {
+		logger.Error("监听失败", "addr", listen, "err", listenErr)
+		fmt.Fprintf(os.Stderr,
+			"端口 %s 监听失败：%v\n"+
+				"  多为上次运行的残留实例占用。定位并结束它：\n"+
+				"    netstat -ano | findstr %s\n"+
+				"    taskkill /PID <上面查到的PID> /F\n", listen, listenErr, listen)
+		_ = store.Close(db)
+		logx.Shutdown()
+		os.Exit(1)
+	}
 	serveErr := make(chan error, 1)
 	go func() {
 		logger.Info("管理平台启动", "addr", listen, "runtime", "fork", "version", buildinfo.Version)
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- err
 		}
 	}()

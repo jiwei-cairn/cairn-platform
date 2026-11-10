@@ -284,62 +284,17 @@
 
           <div class="settings-card">
             <div class="settings-card-head"><i class="bi bi-hdd-network"></i>
-              <div><div class="settings-card-title">TFTP 服务端</div><div class="settings-card-sub">在线升级源（index.json 清单）</div></div>
+              <div><div class="settings-card-title">远程升级服务器</div><div class="settings-card-sub">OTA 静态托管源（HTTP Pull，cairn/ 目录）</div></div>
             </div>
             <div class="settings-field">
-              <label for="set-tftp-server">服务端 IP <span class="text-danger">*</span></label>
-              <input type="text" class="form-control" id="set-tftp-server" placeholder="192.168.10.9">
-              <div class="invalid-feedback">请输入合法的 IPv4 地址</div>
-            </div>
-            <div class="row g-2">
-              <div class="col-6 settings-field">
-                <label for="set-tftp-port">端口 <span class="text-danger">*</span></label>
-                <input type="number" class="form-control" id="set-tftp-port" placeholder="69">
-                <div class="invalid-feedback">端口需在 1–65535 之间</div>
-              </div>
-              <div class="col-6 settings-field">
-                <label for="set-tftp-timeout">超时（秒）</label>
-                <input type="number" class="form-control" id="set-tftp-timeout" placeholder="5">
-                <div class="invalid-feedback">超时需在 1–60 秒</div>
-              </div>
-            </div>
-            <div class="row g-2">
-              <div class="col-6 settings-field">
-                <label for="set-tftp-retries">重试次数</label>
-                <input type="number" class="form-control" id="set-tftp-retries" placeholder="3">
-                <div class="invalid-feedback">重试需在 0–10 次</div>
-              </div>
-              <div class="col-6 settings-field">
-                <label for="set-tftp-index">index.json 路径</label>
-                <input type="text" class="form-control" id="set-tftp-index" placeholder="/index.json">
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-card">
-            <div class="settings-card-head"><i class="bi bi-usb-symbol"></i>
-              <div><div class="settings-card-title">U盘策略</div><div class="settings-card-sub">离线升级目录与扫描</div></div>
+              <label for="set-ota-server">服务器地址</label>
+              <input type="text" class="form-control" id="set-ota-server" placeholder="http://192.168.1.10:8090">
+              <div class="invalid-feedback">必须是 http(s):// 开头的基址；留空 = 未启用远程升级</div>
             </div>
             <div class="settings-field">
-              <div class="settings-switch"><span>启用 U盘离线升级</span>
-                <div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" id="set-usb-enabled"></div>
-              </div>
-            </div>
-            <div class="settings-field">
-              <label for="set-usb-dir">约定目录名</label>
-              <input type="text" class="form-control" id="set-usb-dir" placeholder="upgrade">
-              <div class="invalid-feedback">约定目录名仅允许字母/数字/._-</div>
-            </div>
-            <div class="row g-2">
-              <div class="col-6 settings-field">
-                <label for="set-usb-scan">挂载点扫描间隔（秒）</label>
-                <input type="number" class="form-control" id="set-usb-scan" placeholder="5">
-                <div class="invalid-feedback">扫描间隔需在 1–60 秒</div>
-              </div>
-              <div class="col-6 settings-field">
-                <label for="set-usb-report">报告文件名</label>
-                <input type="text" class="form-control" id="set-usb-report" placeholder="report.txt">
-              </div>
+              <label for="set-ota-timeout">超时（秒）</label>
+              <input type="number" class="form-control" id="set-ota-timeout" placeholder="30">
+              <div class="invalid-feedback">超时需在 5–120 秒</div>
             </div>
           </div>
 
@@ -757,7 +712,7 @@
   </div>
 </div>
 
-<!-- ═══════════ ⧉ upgrade-source-modal（升级来源选择：OTA / OTG / LOCAL） ═══════════ -->
+<!-- ═══════════ ⧉ upgrade-source-modal（升级来源选择：OTA / LOCAL；OTG 已随方案裁撤） ═══════════ -->
 <div class="modal fade" id="upgrade-source-modal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
@@ -768,12 +723,10 @@
       <div class="modal-body">
         <ul class="nav nav-tabs mb-3" role="tablist">
           <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#us-ota" type="button" role="tab"><i class="bi bi-broadcast me-1"></i>OTA 远程</button></li>
-          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#us-otg" type="button" role="tab"><i class="bi bi-usb-symbol me-1"></i>OTG U盘</button></li>
           <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#us-local" type="button" role="tab"><i class="bi bi-hdd me-1"></i>LOCAL 本地</button></li>
         </ul>
         <div class="tab-content">
           <div class="tab-pane fade show active" id="us-ota" role="tabpanel"><div id="us-ota-body"></div></div>
-          <div class="tab-pane fade" id="us-otg" role="tabpanel"><div id="us-otg-body"></div></div>
           <div class="tab-pane fade" id="us-local" role="tabpanel"><div id="us-local-body"></div></div>
         </div>
       </div>

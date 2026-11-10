@@ -7,14 +7,14 @@ let settingsClockTimer = null;
 
 /* 字段映射（路径 ↔ DOM ID，camelCase 全链路一致） */
 const SET_NUM = [
-  ['tftp.port', 'set-tftp-port'], ['tftp.timeoutSec', 'set-tftp-timeout'], ['tftp.retries', 'set-tftp-retries'],
-  ['usb.scanIntervalSec', 'set-usb-scan'], ['web.port', 'set-web-port'], ['web.sessionTimeoutMin', 'set-web-session'],
+  ['ota.timeoutSec', 'set-ota-timeout'],
+  ['web.port', 'set-web-port'], ['web.sessionTimeoutMin', 'set-web-session'],
   ['logQuota.platformMaxMB', 'set-log-maxmb'], ['logQuota.platformMaxBackups', 'set-log-backups'], ['logQuota.retentionDays', 'set-log-days'], ['logQuota.bufferLines', 'set-log-buffer'],
   ['collect.intervalSec', 'set-collect-interval'], ['collect.keepVersions', 'set-collect-keepversions'], ['collect.dbQuotaMB', 'set-collect-dbquota'],
 ];
-const SET_TEXT = [['tftp.server', 'set-tftp-server'], ['tftp.indexJsonPath', 'set-tftp-index'], ['usb.upgradeDir', 'set-usb-dir'], ['usb.reportName', 'set-usb-report']];
+const SET_TEXT = [['ota.serverUrl', 'set-ota-server']];
 const SET_SELECT = [['logQuota.level', 'set-log-level'], ['collect.downsample', 'set-collect-downsample']];
-const SET_BOOL = [['usb.enabled', 'set-usb-enabled']];
+const SET_BOOL = [];
 
 function getPath(obj, path) { return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj); }
 function setPath(obj, path, v) {
@@ -24,7 +24,7 @@ function setPath(obj, path, v) {
   o[keys[keys.length - 1]] = v;
 }
 const SET_FIELD_LABEL = {
-  'tftp.server': 'TFTP 服务端 IP', 'tftp.port': 'TFTP 端口', 'web.port': 'Web 监听端口',
+  'ota.serverUrl': '远程升级服务器', 'ota.timeoutSec': 'OTA 超时', 'web.port': 'Web 监听端口',
   'logQuota.platformMaxMB': '日志单文件上限', 'collect.intervalSec': '指标采集周期',
 };
 
@@ -96,19 +96,14 @@ function validateSettings(s) {
     const hit = all.find(([p]) => p === path);
     return hit ? hit[1] : null;
   };
-  // TFTP 服务端：空 = 未启用 OTA（出厂默认）；非空则必须是合法 IPv4。
-  const tftpServer = String(s.tftp.server || '').trim();
-  if (tftpServer !== '') {
-    const m = IPV4_RE.exec(tftpServer);
-    if (!m || m.slice(1).some(x => Number(x) > 255)) add(idOf('tftp.server'), '请输入合法的 IPv4 地址');
+  // OTA 服务器：空 = 未启用远程升级（出厂默认）；非空必须是 http(s):// 基址。
+  const otaUrl = String(s.ota.serverUrl || '').trim();
+  if (otaUrl !== '' && !/^https?:\/\/[A-Za-z0-9.:-]+(:[0-9]{1,5})?([\/A-Za-z0-9._\/-]*)?$/.test(otaUrl)) {
+    add(idOf('ota.serverUrl'), '必须是 http:// 或 https:// 开头的基址（不含 /cairn 路径与尾斜杠）');
   }
+  if (!(s.ota.timeoutSec >= 5 && s.ota.timeoutSec <= 120)) add(idOf('ota.timeoutSec'), 'OTA 超时需在 5–120 秒');
   const port = (p, label) => { if (!(s[p.split('.')[0]] && s[p.split('.')[0]][p.split('.')[1]] >= 1 && s[p.split('.')[0]][p.split('.')[1]] <= 65535)) add(idOf(p), label + '需在 1–65535 之间'); };
-  port('tftp.port', 'TFTP 端口');
   port('web.port', 'Web 监听端口');
-  if (!(s.tftp.timeoutSec >= 1 && s.tftp.timeoutSec <= 60)) add(idOf('tftp.timeoutSec'), '超时需在 1–60 秒');
-  if (!(s.tftp.retries >= 0 && s.tftp.retries <= 10)) add(idOf('tftp.retries'), '重试需在 0–10 次');
-  if (!s.usb.upgradeDir || !/^[\w.-]+$/.test(s.usb.upgradeDir)) add(idOf('usb.upgradeDir'), '约定目录名仅允许字母/数字/._-');
-  if (!(s.usb.scanIntervalSec >= 1 && s.usb.scanIntervalSec <= 60)) add(idOf('usb.scanIntervalSec'), '扫描间隔需在 1–60 秒');
   if (!(s.web.sessionTimeoutMin >= 5 && s.web.sessionTimeoutMin <= 1440)) add(idOf('web.sessionTimeoutMin'), '会话超时需在 5–1440 分钟');
   if (!(s.logQuota.platformMaxMB >= 1 && s.logQuota.platformMaxMB <= 512)) add(idOf('logQuota.platformMaxMB'), '单文件上限需在 1–512 MB');
   if (!(s.logQuota.platformMaxBackups >= 1 && s.logQuota.platformMaxBackups <= 20)) add(idOf('logQuota.platformMaxBackups'), '保留份数需在 1–20');

@@ -53,6 +53,15 @@ all: linux windows
 run:
 	$(GO) run . -addr 127.0.0.1:8090
 
+# OTA 验证服务器（docs/upgrade/ota-server.md §8）。
+# 注意：Ctrl+C 后若端口未释放（go run 孤儿实例），按启动日志里的
+# netstat/taskkill 指引清理；生产替换为任意静态托管。
+devserver:
+	$(GO) run ./cmd/devserver -root ./ota-root -addr :8090
+
+devserver-build:
+	$(GO) build -o dist/devserver.exe ./cmd/devserver
+
 # 质量门禁：vet + 双平台编译 + 单元测试（任一失败即中断）
 vet:
 	$(GO) env -u GOOS GOARCH CGO_ENABLED

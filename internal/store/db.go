@@ -30,7 +30,7 @@ func Open(path string) (*gorm.DB, error) {
 		return nil, err
 	}
 	if err := db.AutoMigrate(
-		&Service{}, &ServiceRuntime{}, &MetricPoint{}, &ServiceVersion{},
+		&Service{}, &ServiceRuntime{}, &MetricPoint{},
 		&EventLog{}, &Setting{},
 	); err != nil {
 		return nil, err

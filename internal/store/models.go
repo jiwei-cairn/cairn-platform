@@ -13,23 +13,25 @@ import (
 // Service 服务定义（纯期望态）。监管引擎据此差量调谐，运行结果落在
 // ServiceRuntime / MetricPoint 读模型。
 //
-// 安装制定稿：服务只能经 /api/services/install（manifest 说明文档）进入
-// 平台，统一 managed 模式（平台全权定义与守护）；adopt/unitName 已退役。
+// 安装制定稿：服务只能经包（.cairnpkg）进入平台，统一 managed 模式。
+// 覆盖式升级（decisions.md D5）：无多版本目录，Version 记录当前版本，
+// Manifest 留存当前版本的安装清单快照（导出与排障用）。
 type Service struct {
-	ID            int            `gorm:"primaryKey" json:"id"`
-	// Name 唯一索引：服务名同时是安装目录名与依赖引用键。仅靠预检的
-	// check-then-act 在并发双击安装/保存时会双双通过，产出重复行。
-	Name          string         `gorm:"uniqueIndex;not null" json:"name"`
-	Summary       string         `gorm:"not null;default:''" json:"summary"` // 卡片展示名（中文摘要）：空则回落到 Name
-	ServiceType   string         `json:"serviceType"` // native | opensource（纯标注）
-	WebUrl        string         `json:"webUrl"`      // 独立 Web 控制台地址（空 = 名称不可穿越）
-	ExePath       string         `json:"exePath"`     // 安装产物路径（services/{os}/{arch}/{name}/{version}/…，运行目录相对）
-	Args          datatypes.JSON `json:"args"`
-	WorkDir       string         `json:"workDir"`
-	Env           datatypes.JSON `json:"env"`
-	AutoStart     bool           `json:"autoStart"`
-	Priority      int            `json:"priority"`
-	DependsOn     datatypes.JSON `json:"dependsOn"` // 服务 id 数组（存 id 不存 name，防改名破坏引用）
+	ID          int    `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"uniqueIndex;not null" json:"name"` // 同时是安装目录名
+	Version     string `gorm:"not null;default:''" json:"version"` // 当前版本（语义化）
+	Manifest    datatypes.JSON `json:"manifest"`                    // 当前版本安装清单快照
+	InstalledAt time.Time      `json:"-"`
+	Summary     string         `gorm:"not null;default:''" json:"summary"` // 卡片展示名（中文摘要）：空则回落到 Name
+	ServiceType string         `json:"serviceType"` // native | opensource（纯标注）
+	WebUrl      string         `json:"webUrl"`      // 独立 Web 控制台地址（空 = 名称不可穿越）
+	ExePath     string         `json:"exePath"`     // services/{os}/{arch}/{name}/{entrypoint}
+	Args        datatypes.JSON `json:"args"`
+	WorkDir     string         `json:"workDir"` // 固定 data/{name}（数据与产物分离）
+	Env         datatypes.JSON `json:"env"`
+	AutoStart   bool           `json:"autoStart"`
+	Priority    int            `json:"priority"`
+	DependsOn   datatypes.JSON `json:"dependsOn"` // 服务 id 数组（存 id 不存 name，防改名破坏引用）
 	RestartPolicy datatypes.JSON `json:"restartPolicy"`
 	HealthCheck   datatypes.JSON `json:"healthCheck"`
 	ConfigFile    datatypes.JSON `json:"configFile"`
@@ -78,24 +80,6 @@ type MetricPoint struct {
 	NetTxKBps  float64 `json:"netTxKBps"`
 	NetRxKB    float64 `json:"netRxKB"` // M3 服务行用，当前未写入
 	NetTxKB    float64 `json:"netTxKB"` // M3 服务行用，当前未写入
-}
-
-// ServiceVersion 本地保留版本（回滚水位与防回滚判断依据）。
-//
-// 当前安装只填 Version/DirPath/SizeBytes/Manifest/Active；Checksum 未计算、
-// 无人读取（M2 签名校验落地后启用）。DirPath 写而不读——安装目录总由
-// installRoot() 重新推导。SizeBytes 存的是 manifest.json 字节数而非产物
-// 大小，语义待 M2 修正（届时记录实际产物占用）。
-type ServiceVersion struct {
-	ID          uint           `gorm:"primaryKey" json:"id"`
-	ServiceID   int            `gorm:"index;not null" json:"serviceId"`
-	Version     string         `json:"version"`
-	DirPath     string         `json:"dirPath"`
-	Checksum    string         `json:"checksum"` // M2 验签用，当前未填充
-	SizeBytes   int64          `json:"sizeBytes"`
-	Manifest    datatypes.JSON `json:"manifest"` // 包内清单原样留存（组件、sha256、签名指纹、来源）
-	InstalledAt time.Time      `json:"-"`
-	Active      bool           `json:"active"`
 }
 
 // EventLog 事件流水（大盘“告警原因”与事件中心的数据源）。

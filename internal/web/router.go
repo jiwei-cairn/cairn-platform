@@ -80,15 +80,15 @@ func Router(s *api.Server) http.Handler {
 		r.Get("/logs/stream", s.LogStream)
 		r.Get("/logs/export", s.LogExport)
 
-		// 升级：检查/受理/任务轮询/历史/回滚。
+		// 升级：检查/受理/任务轮询/历史 + 本地上传包（decisions.md A1/A2/D1）。
 		r.Post("/upgrade/check", s.UpgradeCheck)
 		r.Post("/upgrade/apply", s.UpgradeApply)
+		r.Post("/upgrade/local", s.UpgradeLocal)
 		r.Get("/upgrade/tasks/{taskId}", s.UpgradeTask)
 		r.Get("/upgrade/records", s.UpgradeRecords)
-		r.Post("/upgrade/records/{id}/rollback", s.UpgradeRollback)
 
-		// U盘状态与扫描。
-		r.Get("/usb/status", s.UsbStatus)
+		// 导出服务包（.cairnpkg，闭环出口 D9）。
+		r.Get("/services/{id}/export", s.ExportService)
 
 		// 平台配置。
 		r.Get("/settings", s.GetSettings)

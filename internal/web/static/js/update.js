@@ -10,7 +10,7 @@ let upTaskTimer = null;
 
 function updateStartPolling() {
   loadUpdateAll();
-  upUsbTimer = startPolling(loadUsbStatus, 5000);
+  // USB/OTG 已裁撤（decisions.md A2）：无轮询任务。
   if (state.update.taskActive && state.update.taskId) startTaskPolling();
 }
 function updateStopPolling() { upUsbTimer = stopPolling(upUsbTimer); }
@@ -21,7 +21,6 @@ async function loadUpdateAll() {
   try { await loadServices(true); } catch (e) { /* services 错误态由卡片列表呈现 */ }
   renderServiceCards();
   loadUpgradeRecords();
-  loadUsbStatus();
   renderTftpBanner();
 }
 function retryLoadUpdate() { loadUpdateAll(); }
@@ -39,27 +38,27 @@ function upgradeTaskTouches(serviceId) {
   return false;
 }
 
-/* ── TFTP 源状态卡 ── */
+/* ── OTA 源状态卡 ── */
 function renderTftpBanner() {
-  const tftp = (state.settings && state.settings.tftp) || {};
+  const ota = (state.settings && state.settings.ota) || {};
   const b = el('up-tftp-banner');
-  if (!tftp.server) {
-    b.innerHTML = '<i class="bi bi-hdd-network me-2" style="color:var(--warning)"></i>尚未配置 TFTP 服务端，在线升级不可用。' +
+  if (!ota.serverUrl) {
+    b.innerHTML = '<i class="bi bi-hdd-network me-2" style="color:var(--warning)"></i>尚未配置远程升级服务器，OTA 不可用（仍可通过本地包升级）。' +
       '<button class="btn btn-sm btn-outline-secondary py-0 ms-2" onclick="switchSection(\'settings\')">去设置</button>';
     el('up-check-btn').disabled = true;
-    el('up-check-btn').title = '请先在系统设置中配置 TFTP 服务端';
+    el('up-check-btn').title = '请先在系统设置中配置远程升级服务器';
     return;
   }
   el('up-check-btn').disabled = upgradeLocked() || state.update.checking;
   el('up-check-btn').title = '';
   const when = state.update.checkedAt ? fmtClock(state.update.checkedAt) : '尚未检查';
   const cnt = Object.keys(state.update.available).length;
-  b.innerHTML = '<i class="bi bi-hdd-network me-2" style="color:var(--primary)"></i>OTA（TFTP）源：<b>' + escapeHtml(tftp.server) + ':' + tftp.port + '</b>' +
-    ' · 上次检查 ' + when + (state.update.checkedAt ? ' · 清单 ' + cnt + ' 条可用' : '') +
-    ' <span class="text-muted">（清单路径 ' + escapeHtml(tftp.indexJsonPath || '/index.json') + '）</span>';
+  b.innerHTML = '<i class="bi bi-hdd-network me-2" style="color:var(--primary)"></i>OTA 源：<b>' + escapeHtml(ota.serverUrl) + '</b>' +
+    ' · 上次检查 ' + when + (state.update.checkedAt ? ' · ' + cnt + ' 条可用' : '') +
+    ' <span class="text-muted">（静态清单 /cairn/services/index.json）</span>';
 }
 
-/* ── TFTP 检查更新 ── */
+/* ── OTA 检查更新（新清单协议：services[]） ── */
 async function checkUpdates() {
   if (upgradeLocked() || state.update.checking) return;
   const btn = el('up-check-btn');
@@ -67,13 +66,15 @@ async function checkUpdates() {
   state.update.checking = true;
   try {
     const r = await apiPost('/upgrade/check', {});
-    state.update.checkedAt = r.checkedAt || Date.now();
-    state.update.available = {};
-    (r.items || []).forEach(it => { state.update.available[it.serviceId] = it; });
+    state.update.check = r; /* 原始结果（enabled/offline/services） */
+    state.update.checkedAt = Date.now();
+    state.update.available = {}; /* name → 条目 */
+    (r.services || []).forEach(it => { if (it.hasUpdate) state.update.available[it.name] = it; });
     renderServiceCards();
     renderTftpBanner();
-    showToast('info', (r.items || []).length ? '发现 ' + r.items.length + ' 个可用更新' : '当前已是最新版本');
-    renderUsOta(); /* 升级来源 modal 若打开则同步刷新 */
+    const n = Object.keys(state.update.available).length;
+    showToast('info', r.offline ? 'OTA 服务器不可达，显示内置清单' : (n ? '发现 ' + n + ' 个可升级服务' : '全部服务已是最新版本'));
+    renderUsOta();
   } catch (e) {
     showToast('danger', '检查失败：' + e.message);
   }
@@ -82,19 +83,19 @@ async function checkUpdates() {
   renderTftpBanner();
 }
 
-/* ── 单服务升级（L1 确认） ── */
+/* ── 单服务 OTA 升级（L1 确认，apply by name） ── */
 function confirmUpgradeSvc(serviceId) {
   if (upgradeLocked()) return;
   const row = svcById(serviceId);
-  const item = state.update.available[serviceId];
-  if (!row || !item) return;
+  if (!row) return;
+  const item = state.update.available[row.name];
+  if (!item) return;
   confirmDialog({
-    title: '升级服务',
-    html: '<b>' + escapeHtml(svcDisplayName(row)) + '</b>：<code>' + escapeHtml(row.version || '—') + '</code> → <code>' + escapeHtml(item.version) + '</code>' +
-      '<div class="mt-1 text-muted">来源 TFTP · 包 ' + escapeHtml(item.packageName) + ' · 升级期间服务将短暂停止</div>' +
-      '<div class="mt-1 text-muted" style="font-size:12px;">sha256 ' + escapeHtml(String(item.sha256 || '').slice(0, 16)) + '… · ' + fmtBytes(item.sizeBytes) + '</div>',
+    title: '升级服务（OTA）',
+    html: '<b>' + escapeHtml(svcDisplayName(row)) + '</b>：<code>' + escapeHtml(row.version || '—') + '</code> → <code>' + escapeHtml(item.latest) + '</code>' +
+      '<div class="mt-1 text-muted">来源 OTA 最新版 · ' + fmtBytes(item.sizeBytes || 0) + ' · 升级期间服务将短暂停止</div>',
     level: 'L1', confirmText: '确认升级',
-  }).then(ok => { if (ok) { closeUpgradeSource(); startUpgrade({ source: 'tftp', serviceId, version: item.version }); } });
+  }).then(ok => { if (ok) { closeUpgradeSource(); startUpgrade({ name: row.name }); } });
 }
 
 async function startUpgrade(body) {
@@ -107,11 +108,33 @@ async function startUpgrade(body) {
     startTaskPolling();
     renderTaskBanner();
     renderServiceCards();
-    renderRecords();
+    loadUpgradeRecords();
     renderTftpBanner();
   } catch (e) {
     showToast('danger', '升级受理失败：' + e.message);
   }
+}
+
+/* ── 新后端任务 → 旧 UI 模型适配（decisions.md D10：无 health 观察阶段） ── */
+const TASK_PHASE_MAP = {
+  queued:     { key: 'download', idx: 0 },
+  downloading:{ key: 'download', idx: 0 },
+  verifying:  { key: 'verify',   idx: 1 },
+  precheck:   { key: 'precheck', idx: 2 },
+  stopping:   { key: 'stop',     idx: 3 },
+  swapping:   { key: 'switch',   idx: 5 }, /* install+switch 合并为 swapping */
+  starting:   { key: 'health',   idx: 6 },
+  success:    { key: 'commit',   idx: 7 },
+};
+function adaptTask(t) {
+  const m = TASK_PHASE_MAP[t.phase] || TASK_PHASE_MAP.queued;
+  const running = t.phase !== 'success' && t.phase !== 'failed';
+  return {
+    status: t.phase === 'success' ? 'success' : t.phase === 'failed' ? 'failed' : 'running',
+    phase: m.key, phaseIndex: m.idx, mode: t.source === 'ota' ? 'ota' : 'manual',
+    serviceName: t.name, targetVersion: t.toVersion, fromVersion: t.fromVersion,
+    detail: t.error || t.detail || '', source: t.source, taskId: t.taskId,
+  };
 }
 
 /* ── 任务轮询（1s，主理人裁决的统一任务接口） ── */
@@ -124,11 +147,12 @@ function stopTaskPolling() { upTaskTimer = stopPolling(upTaskTimer); }
 async function pollUpgradeTask() {
   if (!state.update.taskId) return;
   try {
-    const t = await apiGet('/upgrade/tasks/' + encodeURIComponent(state.update.taskId));
+    const raw = await apiGet('/upgrade/tasks/' + encodeURIComponent(state.update.taskId));
+    const t = adaptTask(raw);
     state.update.taskSnapshot = t;
     renderUpgradeModal(t);
     renderTaskBanner(t);
-    if (t.status !== 'running') finalizeUpgrade(t);
+    if (!['running'].includes(t.status)) finalizeUpgrade(raw, t);
   } catch (e) {
     /* 任务查询失败：静默重试，5 次后放弃 */
     state.update._taskErrors = (state.update._taskErrors || 0) + 1;
@@ -140,20 +164,21 @@ async function pollUpgradeTask() {
     }
   }
 }
-function finalizeUpgrade(t) {
+function finalizeUpgrade(raw, t) {
   stopTaskPolling();
   state.update._taskErrors = 0;
   state.update.taskActive = false;
   state.update.taskId = null;
-  if (t.status === 'success') showToast('success', '升级成功：' + (t.targetVersion || '完成'));
-  else if (t.status === 'rolledback') showToast('warning', '健康观察失败，已自动回滚至 ' + (t.rolledBackTo || t.targetVersion));
-  else if (t.status === 'partial') showToast('warning', 'U盘批量升级完成：部分包失败或已回滚，详见结果汇总');
-  else showToast('danger', '升级失败：' + (t.detail || '未知原因'));
+  if (t.status === 'success') showToast('success', '部署成功：' + (t.targetVersion || '完成') + '（启动结果由运行监控接管）');
+  else showToast('danger', '部署失败：' + (t.detail || raw.error || '未知原因'));
   el('um-bg').classList.add('d-none');
   el('um-close').classList.remove('d-none');
   renderTaskBanner();
   loadServices(true).then(() => { renderServiceCards(); if (currentSection === 'service') renderServiceCards(); });
   loadUpgradeRecords();
+  // 修复「升级完成后依旧提示可升级」：清单快照必须随终态刷新，
+  // 否则卡片上的升级提示（available 旧快照）在版本已相同后仍然残留。
+  checkUpdates();
 }
 
 /* ── 全局任务横幅（后台化观察入口） ── */
@@ -287,13 +312,11 @@ function renderRecords() {
   const locked = upgradeLocked();
   tb.innerHTML = rows.map(r => {
     const [badgeCls, label] = RECORD_STATUS[r.status] || ['badge-muted', r.status];
-    let action = '—';
-    if (r.canRollback) {
-      action = '<button class="btn btn-outline-secondary btn-sm" onclick="rollbackVersion(' + r.id + ')"' + (locked ? ' disabled title="升级进行中"' : ' title="回滚到 ' + escapeHtml(r.fromVersion) + '"') + '><i class="bi bi-arrow-counterclockwise me-1"></i>回滚</button>';
-    }
+    // 覆盖式升级无多版本目录，回退 = 重新上传旧版包（decisions.md B6/D1）。
+    let action = '<button class="btn btn-outline-secondary btn-sm" onclick="promptLocalRollback(' + r.serviceId + ')" title="通过上传旧版本包回退"><i class="bi bi-arrow-counterclockwise me-1"></i>旧版重装</button>';
     return '<tr>' +
       '<td class="text-nowrap">' + fmtDateTime(r.createdAt) + '</td>' +
-      '<td class="fw-semibold">' + escapeHtml(r.serviceName || '#' + r.serviceId) + '</td>' +
+      '<td class="fw-semibold">' + escapeHtml(r.serviceName || '#' + r.serviceId) + '</code></td>' +
       '<td><code>' + escapeHtml(r.fromVersion) + '</code> → <code>' + escapeHtml(r.toVersion) + '</code></td>' +
       '<td><span class="mc-tag">' + (UPGRADE_SOURCE[r.source] || r.source) + '</span></td>' +
       '<td><span class="badge ' + badgeCls + '">' + label + '</span>' +
@@ -303,84 +326,14 @@ function renderRecords() {
   }).join('');
 }
 
-/* ── 版本回滚（L2 强确认） ── */
-function rollbackVersion(recordId) {
-  if (upgradeLocked()) return;
-  const rec = state.update.records.find(r => r.id === recordId);
-  if (!rec) return;
-  const svc = svcById(rec.serviceId);
-  const target = rec.fromVersion;
-  confirmDialog({
-    title: '版本回滚',
-    html: '<b>' + escapeHtml(rec.serviceName || '') + '</b>：<code>' + escapeHtml(rec.toVersion) + '</code> → <code>' + escapeHtml(target) + '</code>（上一版本）' +
-      '<ul class="mt-2 mb-0 ps-3" style="font-size:13px;">' +
-      '<li class="mt-1"><i class="bi bi-exclamation-triangle-fill me-1" style="color:var(--danger)"></i>服务将停止后切换，健康观察失败将停留在回滚版本</li>' +
-      '<li class="mt-1"><i class="bi bi-exclamation-triangle-fill me-1" style="color:var(--danger)"></i>当前版本 ' + escapeHtml(rec.toVersion) + ' 将转为备用版本（保留 ' + ((state.settings && state.settings.collect && state.settings.collect.keepVersions) || 2) + ' 版）</li>' +
-      '</ul>',
-    level: 'L2', confirmText: '确认回滚', confirmIcon: 'bi-arrow-counterclockwise',
-  }).then(ok => {
-    if (!ok) return;
-    apiPost('/upgrade/records/' + recordId + '/rollback', {})
-      .then(r => {
-        state.update.taskId = r.taskId;
-        state.update.taskActive = true;
-        openUpgradeModal();
-        startTaskPolling();
-        renderTaskBanner();
-        renderServiceCards();
-        renderRecords();
-      })
-      .catch(e => showToast('danger', '回滚受理失败：' + e.message));
-  });
-}
-
-/* ── U盘状态轮询（GET /api/usb/status，供升级来源 modal OTG tab 消费） ── */
-async function loadUsbStatus() {
-  try {
-    state.update.usb = await apiGet('/usb/status');
-    state.update.usbError = null;
-  } catch (e) {
-    state.update.usbError = e.message;
-    // 501 = OTG 能力尚未实现（M2）。永久性不可用不应每 5s 重试：
-    // 停掉轮询，等用户手动打开 OTG tab 或点重新扫描时再触发。
-    if (e.status === 501) {
-      upUsbTimer = stopPolling(upUsbTimer);
-    }
-  }
-  renderUsOtg();
-}
-async function rescanUsb() {
-  try {
-    state.update.usb = await apiGet('/usb/status?rescan=1');
-    if (state.update.usb.scan) state.update.usb.scan.state = 'scanning';
-    renderUsOtg();
-    showToast('info', '已触发重新扫描');
-    setTimeout(loadUsbStatus, 2600);
-  } catch (e) { showToast('danger', '扫描失败：' + e.message); }
-}
-
-/* ── U盘批量升级（L2 强确认） ── */
-function confirmUsbUpgrade() {
-  if (upgradeLocked()) return;
-  const usb = state.update.usb || {};
-  const pkgs = ((usb.scan && usb.scan.packages) || []).filter(p => p.signOk);
-  const bad = ((usb.scan && usb.scan.packages) || []).filter(p => !p.signOk);
-  if (!pkgs.length) return;
-  const lines = pkgs.map(p => {
-    const svc = svcById(p.serviceId);
-    return '<li class="mt-1"><b>' + escapeHtml(svc ? svcTitle(svc) : '#' + p.serviceId) + '</b>：<code>' + escapeHtml(svc ? (svc.version || '—') : '—') + '</code> → <code>' + escapeHtml(p.version) + '</code></li>';
-  }).join('');
-  confirmDialog({
-    title: 'U盘批量升级',
-    html: '将升级以下 <b>' + pkgs.length + '</b> 个服务：<ul class="mt-1 mb-0 ps-3" style="font-size:13px;">' + lines + '</ul>' +
-      '<div class="mt-2 text-muted" style="font-size:12.5px;">升级期间相关服务按依赖逆序短暂停止，全部结果写回 U盘 report.txt。</div>' +
-      (bad.length ? '<div class="mt-1" style="color:var(--warning)"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + bad.length + ' 个包验签失败已跳过</div>' : '') +
-      '<ul class="mt-2 mb-0 ps-3" style="font-size:13px;"><li class="mt-1"><i class="bi bi-exclamation-triangle-fill me-1" style="color:var(--danger)"></i>多包升级为原子流水线，任一包健康观察失败将单独回滚该包</li></ul>',
-    level: 'L2', confirmText: '确认批量升级', confirmIcon: 'bi-usb-symbol',
-  }).then(ok => { if (ok) { closeUpgradeSource(); startUpgrade({ source: 'usb' }); } });
+// promptLocalRollback 引导用户走本地包回退（不再有服务端一键回滚端点）。
+function promptLocalRollback(serviceId) {
+  const svc = svcById(serviceId);
+  showToast('info', '回退方式：获取旧版本 .cairnpkg（如从导出或服务器历史包下载），在升级页选择「本地包升级」上传安装。' + (svc ? '（' + svc.name + '）' : ''));
 }
 
 /* ══════════════ 升级来源 modal（OTA / OTG / LOCAL） ══════════════ */
+/* USB/OTG 已随方案裁撤（decisions.md A2）：rescan/batch 等函数一并移除。 */
 function openUpgradeSource(serviceId) {
   const row = svcById(serviceId);
   if (!row) return;
@@ -388,125 +341,74 @@ function openUpgradeSource(serviceId) {
   state.update.usSvcId = serviceId;
   setText('us-svc', row.name);
   renderUsOta();
-  renderUsOtg();
   renderUsLocal();
   usModal.show();
 }
 function closeUpgradeSource() { if (typeof usModal !== 'undefined' && usModal) usModal.hide(); }
 
-/* ── OTA tab：远程版本选择 ── */
+/* ── OTA tab：远程最新版 ── */
 function renderUsOta() {
   const body = el('us-ota-body');
   if (!body) return;
-  const svcId = state.update.usSvcId;
-  const row = svcId ? svcById(svcId) : null;
+  const row = svcById(state.update.usSvcId);
   if (!row) { body.innerHTML = ''; return; }
-  const avail = state.update.available[svcId];
-  const tftp = (state.settings && state.settings.tftp) || {};
-  let html = '<div class="info-banner mb-3"><i class="bi bi-broadcast me-2" style="color:var(--primary)"></i>远程源 <b>' + escapeHtml(tftp.server || '未配置') + (tftp.server ? ':' + tftp.port : '') + '</b>' +
-    ' · 当前版本 <code>' + escapeHtml(row.version || '—') + '</code></div>';
-  if (avail) {
+  const ota = (state.settings && state.settings.ota) || {};
+  const check = state.update.check;
+  const item = (check && (check.services || []).find(s => s.name === row.name)) || null;
+  let html = '<div class="info-banner mb-3"><i class="bi bi-broadcast me-2" style="color:var(--primary)"></i>OTA 源 <b>' + escapeHtml(ota.serverUrl || '未配置') + '</b>' +
+    ' · 当前版本 <code>' + escapeHtml(row.version || '—') + '</code>' + (item && item.latest ? ' · 最新版 <code>' + escapeHtml(item.latest) + '</code>' : '') + '</div>';
+  if (item && item.hasUpdate) {
     html += '<div class="d-flex align-items-center flex-wrap p-3" style="gap:12px;border:1px solid var(--primary-border);border-radius:10px;">' +
-      '<div><div class="fw-semibold">' + escapeHtml(avail.packageName) + '</div>' +
-      '<div class="small text-muted">' + fmtBytes(avail.sizeBytes) + ' · sha256 ' + escapeHtml(String(avail.sha256 || '').slice(0, 16)) + '…</div></div>' +
-      '<span class="badge badge-r ms-auto">可升级 ' + escapeHtml(avail.version) + '</span>' +
-      '<button class="btn btn-primary" onclick="confirmUpgradeSvc(' + svcId + ')"><i class="bi bi-cloud-arrow-down me-1"></i>升级到 ' + escapeHtml(avail.version) + '</button></div>';
+      '<div><div class="fw-semibold">' + escapeHtml(item.latest) + '</div>' +
+      '<div class="small text-muted">' + fmtBytes(item.sizeBytes || 0) + (item.notes ? ' · ' + escapeHtml(item.notes) : '') + '</div></div>' +
+      '<span class="badge badge-r ms-auto">可升级</span>' +
+      '<button class="btn btn-primary" onclick="confirmUpgradeSvc(' + row.id + ')"><i class="bi bi-cloud-arrow-down me-1"></i>升级到 ' + escapeHtml(item.latest) + '</button></div>';
+  } else if (item && item.latest) {
+    html += '<div class="text-muted" style="padding:6px 2px;"><i class="bi bi-check-circle me-1"></i>已是最新版本 ' + escapeHtml(item.latest) + '。</div>';
   } else {
-    html += '<div class="text-muted" style="padding:6px 2px;"><i class="bi bi-info-circle me-1"></i>暂无该服务的可用远程版本。' +
-      (tftp.server ? '点击「检查更新」从清单刷新。' : '请先在「设置」中配置 TFTP 服务端。') + '</div>' +
-      '<button class="btn btn-outline-primary btn-sm mt-1" onclick="checkUpdates()"' + (tftp.server ? '' : ' disabled') + '><i class="bi bi-arrow-repeat me-1"></i>检查更新</button>';
+    html += '<div class="text-muted" style="padding:6px 2px;"><i class="bi bi-info-circle me-1"></i>暂无该服务的远程版本信息。' +
+      (ota.serverUrl ? '点击「检查更新」从清单刷新。' : '请先在「设置」中配置远程升级服务器。') + '</div>' +
+      '<button class="btn btn-outline-primary btn-sm mt-1" onclick="checkUpdates()"' + (ota.serverUrl ? '' : ' disabled') + '><i class="bi bi-arrow-repeat me-1"></i>检查更新</button>';
   }
   body.innerHTML = html;
 }
-/* ── OTG tab：U盘升级包（原独立 OTG 入口卡并入此处） ── */
-function renderUsOtg() {
-  const body = el('us-otg-body');
-  if (!body) return;
-  const svcId = state.update.usSvcId;
-  const usb = state.update.usb || {};
-  const dir = (state.settings && state.settings.usb && state.settings.usb.upgradeDir) || 'upgrade';
-  /* 状态轮询失败：错误态 + 重试 */
-  if (state.update.usbError) { body.innerHTML = errorState('U盘状态获取失败：' + state.update.usbError, 'loadUsbStatus()'); return; }
-  /* 首次加载中：尚未拉取过状态 */
-  if (!state.update.usb) { body.innerHTML = loadingState('U盘状态检测中…'); return; }
-  if (usb.status === 'absent') {
-    body.innerHTML = emptyState('bi-usb-symbol', '未检测到 U盘，插入后自动扫描 <b>' + escapeHtml(dir) + '/</b> 目录');
-    return;
-  }
-  /* 接入后扫描中 */
-  if (usb.scan && usb.scan.state === 'scanning') {
-    body.innerHTML = '<div class="empty-state"><div class="spinner-border spinner-border-sm me-2" style="color:var(--primary)"></div>' +
-      '已接入 <b>' + escapeHtml(usb.label || usb.device) + '</b>，正在扫描 ' + escapeHtml(dir) + '/ 目录…</div>';
-    return;
-  }
-  /* 盘符信息行 + 重新扫描 */
-  let html = '<div class="d-flex align-items-center flex-wrap mb-2" style="gap:10px;">' +
-    '<span class="led led-on"></span><b>' + escapeHtml(usb.label || usb.device) + '</b>' +
-    '<span class="text-muted small">' + escapeHtml(usb.device) + ' · ' + (usb.capacityGB || '—') + 'GB</span>' +
-    '<button class="btn btn-outline-secondary btn-sm ms-auto" onclick="rescanUsb()" title="重新扫描"><i class="bi bi-arrow-repeat me-1"></i>重新扫描</button></div>';
-  const pkgs = (usb.scan && usb.scan.packages) || [];
-  if (!pkgs.length) {
-    body.innerHTML = html + '<div class="info-banner mb-0"><i class="bi bi-info-circle-fill me-2" style="color:var(--primary)"></i>U盘已接入，' + escapeHtml(dir) + '/ 目录未发现有效升级包</div>';
-    return;
-  }
-  const mine = pkgs.filter(p => Number(p.serviceId) === Number(svcId) && p.signOk);
-  const bad = pkgs.filter(p => !p.signOk);
-  html += '<div class="table-responsive"><table class="table table-sm table-hover align-middle"><thead><tr><th>包</th><th>目标服务</th><th>版本</th><th>验签</th></tr></thead><tbody>' +
-    pkgs.map(p => {
-      const svc = svcById(p.serviceId);
-      return '<tr' + (p.signOk ? '' : ' style="opacity:.55"') + '><td class="text-truncate" style="max-width:220px;" title="' + escapeHtml(p.packageName) + '">' + escapeHtml(p.packageName) + '</td>' +
-        '<td class="fw-semibold">' + escapeHtml(svc ? svcTitle(svc) : '#' + p.serviceId) + (mine.includes(p) ? ' <span class="badge badge-ok ms-1">本服务</span>' : '') + '</td>' +
-        '<td><code>' + escapeHtml(p.version) + '</code></td>' +
-        '<td>' + (p.signOk ? '<span class="badge badge-ok">通过</span>' : '<span class="badge badge-err" title="' + escapeHtml(p.reason || '') + '">失败</span>') + '</td></tr>';
-    }).join('') + '</tbody></table></div>';
-  if (mine.length) {
-    html += '<div class="d-flex align-items-center mt-2 flex-wrap" style="gap:10px;"><span class="text-muted small">U盘升级将按依赖拓扑序批量执行全部有效包 · 结果写回 U盘 <code>report.txt</code></span>' +
-      '<button class="btn btn-primary btn-sm ms-auto" onclick="confirmUsbUpgrade()"' + (upgradeLocked() ? ' disabled' : '') + '><i class="bi bi-usb-symbol me-1"></i>执行 U盘升级</button></div>';
-  } else {
-    html += '<div class="text-muted small mt-2"><i class="bi bi-info-circle me-1"></i>U盘中没有该服务的有效包，可执行批量升级其余包</div>' +
-      '<div class="mt-1"><button class="btn btn-outline-primary btn-sm" onclick="confirmUsbUpgrade()"' + (upgradeLocked() ? ' disabled' : '') + '><i class="bi bi-usb-symbol me-1"></i>批量升级其余包</button></div>';
-  }
-  if (bad.length) html += '<div class="text-muted small mt-1"><i class="bi bi-exclamation-triangle-fill me-1" style="color:var(--warning)"></i>' + bad.length + ' 个包验签失败已跳过</div>';
-  body.innerHTML = html;
-}
-
-/* ── LOCAL tab：本地包路径升级 ── */
+/* ── LOCAL tab：上传 .cairnpkg（安装或升级，自动判别） ── */
 function renderUsLocal() {
   const body = el('us-local-body');
   if (!body) return;
   const row = svcById(state.update.usSvcId);
   if (!row) { body.innerHTML = ''; return; }
-  /* 路径示例按运行平台给出，避免 Windows 用户照抄 Linux 路径。 */
-  const example = isWindowsPlatform()
-    ? 'C:\\packages\\' + row.name + '_v1.0.0_windows_amd64.zip'
-    : '/opt/packages/' + row.name + '_v1.0.0_linux_arm64.pkg';
-  const hint = isWindowsPlatform()
-    ? '设备本机文件系统中的升级包绝对路径（例如工程师通过共享目录预先拷贝）'
-    : '设备本机文件系统中的升级包绝对路径（例如工程师通过 SCP 预先拷贝）';
   body.innerHTML =
-    '<div class="mb-3"><label class="form-label fw-semibold" for="us-local-path">本地包路径 <span class="text-danger">*</span></label>' +
-    '<input type="text" class="form-control" id="us-local-path" placeholder="' + escapeHtml(example) + '">' +
-    '<div class="form-text">' + escapeHtml(hint) + '</div></div>' +
-    '<div class="mb-3"><label class="form-label fw-semibold" for="us-local-version">目标版本 <span class="text-danger">*</span></label>' +
-    '<input type="text" class="form-control" id="us-local-version" placeholder="v1.0.0"></div>' +
-    '<div class="info-banner mb-0"><i class="bi bi-info-circle me-2" style="color:var(--primary)"></i>LOCAL 升级沿用统一任务流水线：下载阶段为本地拷贝，验签失败将中止且服务不受影响。</div>' +
-    '<button class="btn btn-primary mt-3" onclick="startLocalUpgrade()"><i class="bi bi-hdd me-1"></i>开始 LOCAL 升级</button>';
+    '<div class="mb-3"><label class="form-label fw-semibold" for="us-local-file">升级包（.cairnpkg）<span class="text-danger">*</span></label>' +
+    '<input type="file" class="form-control" id="us-local-file" accept=".cairnpkg">' +
+    '<div class="form-text">包内清单声明的服务与版本为准；与当前版本不一致即可升级（含回退）。</div></div>' +
+    '<div class="info-banner mb-0"><i class="bi bi-info-circle me-2" style="color:var(--primary)"></i>覆盖式部署：停服 → 换文件 → 启服。数据目录 data/' + escapeHtml(row.name) + '/ 不受影响；被覆盖的用户配置保留 .bak 一份。</div>' +
+    '<button class="btn btn-primary mt-3" onclick="startLocalUpgrade()"><i class="bi bi-box-arrow-in-up me-1"></i>上传并部署</button>';
 }
 function startLocalUpgrade() {
-  if (upgradeLocked()) return;
+  if (upgradeLocked()) { showToast('warning', '已有升级任务进行中'); return; }
   const row = svcById(state.update.usSvcId);
   if (!row) return;
-  const p = val('us-local-path');
-  const v = val('us-local-version');
-  if (!p || !v) { showToast('warning', '请填写本地包路径与目标版本'); return; }
-  confirmDialog({
-    title: 'LOCAL 本地升级',
-    html: '<b>' + escapeHtml(svcDisplayName(row)) + '</b>：<code>' + escapeHtml(row.version || '—') + '</code> → <code>' + escapeHtml(v) + '</code>' +
-      '<div class="mt-1 text-muted">包 ' + escapeHtml(p) + ' · 升级期间服务将短暂停止</div>',
-    level: 'L1', confirmText: '确认升级',
-  }).then(ok => {
-    if (!ok) return;
-    closeUpgradeSource();
-    startUpgrade({ source: 'local', serviceId: row.id, version: v, localPath: p });
-  });
+  const input = el('us-local-file');
+  const file = input && input.files && input.files[0];
+  if (!file) { showToast('warning', '请选择 .cairnpkg 包文件'); return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  btnBusy(el('um-confirm') || input, '上传中…');
+  fetch('/api/upgrade/local', { method: 'POST', body: fd })
+    .then(async r => {
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.code) throw new Error(j.msg || ('HTTP ' + r.status));
+      return j.data;
+    })
+    .then(d => {
+      closeUpgradeSource();
+      state.update.taskId = d.taskId;
+      state.update.taskActive = true;
+      openUpgradeModal();
+      startTaskPolling();
+      renderTaskBanner();
+      showToast('info', '已受理（' + (d.mode === 'upgrade' ? '升级' : '安装') + '），任务执行中');
+    })
+    .catch(e => showToast('danger', '上传失败：' + e.message));
 }

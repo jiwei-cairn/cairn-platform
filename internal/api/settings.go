@@ -52,8 +52,7 @@ func (s *Server) SaveSettings(w http.ResponseWriter, r *http.Request) {
 		name string
 		a, b any
 	}{
-		{"tftp", prev.TFTP, next.TFTP},
-		{"usb", prev.USB, next.USB},
+		{"ota", prev.OTA, next.OTA},
 		{"web", prev.Web, next.Web},
 		{"logQuota", prev.LogQuota, next.LogQuota},
 		{"collect", prev.Collect, next.Collect},
