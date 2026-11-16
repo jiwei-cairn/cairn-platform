@@ -91,9 +91,6 @@ type Manifest struct {
 	Signature json.RawMessage `json:"signature"`
 }
 
-// ValidateManifestName 校验服务名（供部署层在打包前单独校验）。
-func ValidateManifestName(name string) bool { return nameRE.MatchString(name) }
-
 // Validate 校验清单的全部格式约束。
 func (m *Manifest) Validate() error {
 	if m.Schema != SchemaVersion {

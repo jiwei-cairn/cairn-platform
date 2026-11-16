@@ -1,7 +1,9 @@
 # ---- 平台运行产物（数据根默认落在仓库根时产生，不入库）----
-/data/
-/logs/
-/services/
+# 不锚定根目录：go test 的 CWD 是包目录，运行期目录可能出现在任意层级
+# （实测曾在 internal/api/ 下生成 data/ 与 services/）。
+data/
+logs/
+services/
 /smoke/
 /smoke-t/
 *.db

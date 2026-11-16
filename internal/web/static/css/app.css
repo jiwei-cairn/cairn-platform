@@ -90,6 +90,30 @@ body { margin: 0; background: var(--bg); min-height: 100vh; font-family: -apple-
 .settings-card-head i { color: var(--primary); font-size: 19px; }
 .settings-card-title { font-weight: 700; color: var(--text-strong); }
 .settings-card-sub { color: var(--muted-color); font-size: 12px; margin-top: 1px; }
+/* 字段说明图标：label 旁的 ? 承载解释，替代原先的灰色说明文字
+   （省空间、不破坏三列等宽对齐；点击/聚焦均可查看，触屏亦可用）。 */
+.field-hint {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; margin-left: 5px;
+  border-radius: 50%; border: 1px solid var(--text-faint, #adb5bd);
+  color: var(--text-faint, #adb5bd);
+  font-size: 10px; font-weight: 700; line-height: 1;
+  cursor: help; vertical-align: 1px; user-select: none;
+  transition: all .15s;
+}
+.field-hint:hover, .field-hint:focus {
+  border-color: var(--primary); color: var(--primary);
+  background: var(--primary-light, rgba(13,110,253,.08));
+  outline: none;
+}
+
+/* 服务表单「基本信息」：三行等宽三列，开关格与输入框等高对齐。
+   输入框（.form-control）默认高约 38px，Bootstrap switch 仅约 24px，
+   直接混排会让第三行比前两行矮——统一给开关格最小高度。 */
+.sm-switch-cell .form-check { min-height: 38px; display: flex; align-items: center; gap: 8px; margin-bottom: 0; }
+.sm-switch-cell .form-check-input { margin-top: 0; flex-shrink: 0; }
+.sm-switch-cell .form-check-label { font-size: 13px; }
+
 .settings-field { margin-bottom: 14px; }
 .settings-field:last-child { margin-bottom: 0; }
 .settings-field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); margin-bottom: 5px; }

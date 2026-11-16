@@ -10,6 +10,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -61,7 +62,13 @@ func (s *Server) precheckDeploy(m *pack.Manifest) error {
 // 阶段：校验 → 预检 → （升级）停服等待退出 → 解包 .staging → 换文件 →
 // 落库 → （升级）发起启动 → 清理。
 // 任何阶段失败：升级模式尽力把 .old 换回（文件级可逆），任务标记 failed。
-func (s *Server) runDeployPipeline(t *upgradeTask, pkgPath, source string) error {
+//
+// 取消语义：每个阶段边界检查 ctx。任务超时后执行体会在此收尾退出，
+// 保证「同一时刻只有一个流水线在动文件」，不会与后续任务并发写同一目录。
+func (s *Server) runDeployPipeline(ctx context.Context, t *upgradeTask, pkgPath, source string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("任务已取消: %w", err)
+	}
 	s.Tasks.updatePhase(t, PhaseVerifying, "打开并校验包")
 	p, err := pack.Open(pkgPath)
 	if err != nil {
@@ -84,7 +91,7 @@ func (s *Server) runDeployPipeline(t *upgradeTask, pkgPath, source string) error
 	} else {
 		t.Mode = "install"
 	}
-	if t.Mode == "upgrade" && def.Version == m.Version {
+	if t.Mode == "upgrade" && pack.MustCompareSemVer(m.Version, def.Version) == 0 {
 		return fmt.Errorf("当前已是 %s，无需重复部署", m.Version)
 	}
 
@@ -112,6 +119,10 @@ func (s *Server) runDeployPipeline(t *upgradeTask, pkgPath, source string) error
 	}
 
 	// ── 解包到 .staging（逐文件 sha256 全量校验）──
+	// 解包是最长的一段 IO；取消检查放在其前的边界（换文件阶段不可中断）。
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("任务已取消: %w", err)
+	}
 	s.Tasks.updatePhase(t, PhaseSwapping, "解包并校验文件")
 	if err := os.MkdirAll(svcDir, 0o755); err != nil {
 		return err
@@ -139,8 +150,12 @@ func (s *Server) runDeployPipeline(t *upgradeTask, pkgPath, source string) error
 	}
 
 	// ── 数据目录（安装时创建；升级不触碰内容，E2）──
+	// 失败必须阻断：工作目录不存在会让服务启动必然失败，
+	// 若继续返回 success，用户会看到「部署成功」但服务起不来。
 	if err := os.MkdirAll(dataDirOf(m.Name), 0o755); err != nil {
-		logx.Module("deploy").Warn("创建数据目录失败", "svc", m.Name, "err", err)
+		s.rollbackSwap(swapped)
+		_ = os.RemoveAll(staging)
+		return fmt.Errorf("创建数据目录失败（服务将无法启动）: %w", err)
 	}
 
 	// ── 发起启动（D10：指令发出即任务收尾，不等待运行结果）──

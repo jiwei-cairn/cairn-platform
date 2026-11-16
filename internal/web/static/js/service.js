@@ -13,12 +13,13 @@ let smUploads = { main: null, extras: [], config: null };
 
 /* ── 表单字段映射（与表单 DOM 一致；精简后无 exePath/workDir/健康检查/依赖/配置文件项） ── */
 const SM_TEXT = { name: 'sm-name', summary: 'sm-summary', webUrl: 'sm-webUrl', version: 'sm-version', argsText: 'sm-args', envText: 'sm-env', logPath: 'sm-logPath' };
-const SM_SELECT = { serviceType: 'sm-serviceType', restartMode: 'sm-restartMode', logMode: 'sm-logMode' };
+const SM_SELECT = { serviceType: 'sm-serviceType', restartMode: 'sm-restartMode', logMode: 'sm-logMode', arch: 'sm-arch' };
 const SM_NUM = { priority: 'sm-priority', periodicSec: 'sm-periodicSec', maxRetries: 'sm-maxRetries', windowSec: 'sm-windowSec', backoffBase: 'sm-backoffBase', backoffMax: 'sm-backoffMax', logMaxSizeMB: 'sm-logMaxSizeMB', logMaxBackups: 'sm-logMaxBackups' };
 
 function defaultServiceForm() {
   return {
     id: 0, name: '', summary: '', serviceType: 'native', webUrl: '', version: '1.0.0',
+  arch: '', /* 目标架构：空 = 跟随本机不校验 */
     enabled: true, autoStart: true, priority: 100,
     argsText: '', envText: '',
     restartMode: 'backoff', periodicSec: 3, maxRetries: 0, windowSec: 0, backoffBase: 2, backoffMax: 300,
@@ -212,9 +213,13 @@ function openServiceModal(id) {
   const f = row ? serviceFromRow(row) : defaultServiceForm();
   fillSmForm(f);
   const isNew = !row;
-  /* 安装文件区 / 版本：仅新建；名称：编辑时锁定（目录名/说明卡主键）。 */
+  /* 安装文件区：仅新建（编辑时无包可传）。 */
   el('sm-files-section').classList.toggle('d-none', !isNew);
-  el('sm-version-wrap').classList.toggle('d-none', !isNew);
+  /* 版本：编辑态不隐藏而是转只读——保持三行三列等宽对齐（隐藏会让
+     第二行缺一格、右端留白）。版本变更走升级通道，不在此处编辑。 */
+  el('sm-version-wrap').classList.remove('d-none');
+  el('sm-version').disabled = !isNew;
+  el('sm-version').title = isNew ? '' : '版本变更请通过升级功能';
   el('sm-name').disabled = !isNew;
   smUploads = { main: null, extras: [], config: null };
   /* 重置服务名自动填充状态（新建态：允许后续上传自动填充） */
@@ -342,9 +347,11 @@ function autofillServiceSummary(fileName) {
 
 function resetSmFileInputs() {
   ['sm-file-main', 'sm-file-extras', 'sm-file-config'].forEach(id2 => { const i = el(id2); if (i) i.value = ''; });
-  setText('sm-file-main-name', '可执行文件（Windows 运行选 .exe；Linux 选本机架构）');
-  setText('sm-file-extras-name', 'dll / so / 静态库等 → dependencies/ 目录');
-  setText('sm-file-config-name', '可选 → config/ 目录，参数用 -c config/文件名 引用');
+  // 说明文字由 label 旁的 ? 图标 tooltip 承载，此处只作「上传结果」反馈位，
+  // 未选择时留空（避免与 tooltip 重复）。
+  setText('sm-file-main-name', '');
+  setText('sm-file-extras-name', '');
+  setText('sm-file-config-name', '');
 }
 
 /* ── 文件上传交互：选择即暂存（POST /services/upload）── */
@@ -366,7 +373,7 @@ async function onSmFilesPick(kind, input) {
       setText('sm-file-extras-name', '✓ ' + r.files.map(f => f.name).join('、'));
     } else {
       smUploads.config = r.files[0];
-      setText('sm-file-config-name', '✓ ' + r.files[0].name + ' → config/' + r.files[0].name + '（参数用 -c config/' + r.files[0].name + '）');
+      setText('sm-file-config-name', '✓ ' + r.files[0].name + ' → config/');
     }
   } catch (e) {
     showToast('danger', '上传失败：' + e.message);
@@ -486,6 +493,8 @@ function buildInstallRequest(f) {
     logPolicy: { mode: f.logMode, path: (f.logPath || '').trim(), maxSizeMB: toNum(f.logMaxSizeMB, 10), maxBackups: toNum(f.logMaxBackups, 3) },
     extraFiles: smUploads.extras.map(x => x.name),
   };
+  // 目标架构（可选）：留空则不写该字段，后端预检跳过架构校验。
+  if ((f.arch || '').trim()) manifest.arch = f.arch.trim();
   const overrides = {
     enabled: f.enabled, autoStart: f.autoStart, priority: toNum(f.priority, 100),
     localBinary: smUploads.main ? smUploads.main.path : '',

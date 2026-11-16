@@ -55,6 +55,7 @@ function onVisibilityChange() {
 
 async function init() {
   initModals();
+  initTooltips();
   document.addEventListener('visibilitychange', onVisibilityChange);
   window.addEventListener('beforeunload', () => logCenterLeave());
 
@@ -70,6 +71,22 @@ async function init() {
   switchSection('dash');
 
   
+}
+
+/* ── 字段说明 tooltip（label 旁的 ? 图标承载） ──
+   title 属性的固有限制：聚焦输入框即失效、有悬停延迟、触屏完全不显示、
+   与 placeholder/aria-label 互相干扰。改用 Bootstrap tooltip：
+   聚焦仍可见、触屏点按可见、样式统一。
+   事件委托 + data-bs-toggle 选择器，对动态渲染内容（服务卡片等）同样生效。 */
+function initTooltips() {
+  if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
+  new bootstrap.Tooltip(document.body, {
+    selector: '[data-bs-toggle="tooltip"]',
+    trigger: 'hover focus',   /* focus：点进输入框后仍可查看说明 */
+    placement: 'top',
+    container: 'body',        /* 避免被 modal 的 overflow 裁切 */
+    delay: { show: 200, hide: 0 },
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);

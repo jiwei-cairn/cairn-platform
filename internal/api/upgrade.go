@@ -50,6 +50,14 @@ const (
 // taskTimeout 单任务超时（卡死防护，decisions.md §10）。
 const taskTimeout = 10 * time.Minute
 
+// maxRetainedTasks 内存中保留的任务数上限（超出淘汰最旧已结束任务）。
+// 任务对象持有 run 闭包（捕获 Server 等），不清理会造成闭包链常驻。
+const maxRetainedTasks = 200
+
+// taskRetention 终态任务的保留期：结束后至少保留这么久才允许淘汰，
+// 避免前端轮询迟到而拿到 404。
+const taskRetention = 10 * time.Minute
+
 // upgradeTask 一个升级/安装任务。
 type upgradeTask struct {
 	ID        string    `json:"taskId"`
@@ -64,15 +72,19 @@ type upgradeTask struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 
-	run func(t *upgradeTask) error // 队列 worker 调用
+	// run 执行体：必须响应 ctx 取消。超时后 worker 不再等待，
+	// 但执行体也应在阶段边界主动中止，避免与后续任务并发操作同一目录。
+	run func(ctx context.Context, t *upgradeTask) error
 }
 
 // taskManager 全局串行任务管理器。
 type taskManager struct {
-	mu    sync.Mutex
-	tasks map[string]*upgradeTask
-	ch    chan *upgradeTask
-	wg    sync.WaitGroup
+	mu     sync.Mutex
+	tasks  map[string]*upgradeTask
+	order  []string // 插入顺序（用于按序淘汰）
+	ch     chan *upgradeTask
+	wg     sync.WaitGroup
+	closed bool
 }
 
 func newTaskManager() *taskManager {
@@ -86,17 +98,26 @@ func newTaskManager() *taskManager {
 }
 
 // worker 单消费者：全局串行执行（D7）。
+//
+// 超时语义：ctx 到期后 worker 不再等待，但执行体自身也监听 ctx——两者共同
+// 保证「同一时刻只有一个部署流水线在动文件」，避免超时任务与后续任务并发
+// 操作同一服务目录（原实现只停止等待，goroutine 继续解包/改名）。
 func (m *taskManager) worker() {
 	defer m.wg.Done()
 	for t := range m.ch {
 		ctx, cancel := context.WithTimeout(context.Background(), taskTimeout)
 		done := make(chan error, 1)
-		go func() { done <- t.run(t) }()
+		go func() { done <- t.run(ctx, t) }()
 		var err error
 		select {
 		case err = <-done:
 		case <-ctx.Done():
-			err = fmt.Errorf("任务超时（%s）被中止", taskTimeout)
+			// 给执行体一个收敛窗口：它在阶段边界看到 ctx.Done 会自行退出。
+			select {
+			case err = <-done:
+			case <-time.After(taskAbortGrace):
+				err = fmt.Errorf("任务超时（%s）被中止", taskTimeout)
+			}
 		}
 		cancel()
 		m.mu.Lock()
@@ -108,11 +129,17 @@ func (m *taskManager) worker() {
 		}
 		t.UpdatedAt = time.Now()
 		m.mu.Unlock()
+		m.sweep() // 每轮结束清扫过期任务（不依赖数量超限）
 	}
 }
 
+// taskAbortGrace 超时后等待执行体响应取消的宽限期。
+// 执行体在解包/换文件等长操作之间检查 ctx，通常毫秒级退出；
+// 超出宽限期也不再等待（标记失败，极端残留由下次启动清理 .staging 兜底）。
+const taskAbortGrace = 5 * time.Second
+
 // Submit 入队一个任务，返回任务快照。
-func (m *taskManager) Submit(mode, source, name, from, to string, run func(t *upgradeTask) error) *upgradeTask {
+func (m *taskManager) Submit(mode, source, name, from, to string, run func(ctx context.Context, t *upgradeTask) error) *upgradeTask {
 	t := &upgradeTask{
 		ID: "up-" + uuid.NewString()[:8], Mode: mode, Source: source,
 		Name: name, FromVer: from, ToVer: to,
@@ -121,6 +148,8 @@ func (m *taskManager) Submit(mode, source, name, from, to string, run func(t *up
 	}
 	m.mu.Lock()
 	m.tasks[t.ID] = t
+	m.order = append(m.order, t.ID)
+	m.evictLocked()
 	m.mu.Unlock()
 	// 队列满：极小概率（64 深度），拒绝而非阻塞。
 	select {
@@ -135,6 +164,32 @@ func (m *taskManager) Submit(mode, source, name, from, to string, run func(t *up
 	return snapshotTask(t)
 }
 
+// evictLocked 淘汰超出上限的「已结束且已过保留期」任务（调用方须持锁）。
+//
+// 保护规则：
+//   - 排队中/执行中的任务绝不淘汰（前端仍在轮询，丢弃即 404）
+//   - 终态任务也需超过 taskRetention 才可淘汰（避免刚结束就被清掉，前端来不及拉结果）
+func (m *taskManager) evictLocked() {
+	if len(m.order) <= maxRetainedTasks {
+		return
+	}
+	cutoff := time.Now().Add(-taskRetention)
+	keep := make([]string, 0, len(m.order))
+	excess := len(m.order) - maxRetainedTasks
+	for _, id := range m.order {
+		t := m.tasks[id]
+		if excess > 0 && t != nil &&
+			(t.Phase == PhaseSuccess || t.Phase == PhaseFailed) &&
+			t.UpdatedAt.Before(cutoff) {
+			delete(m.tasks, id)
+			excess--
+			continue
+		}
+		keep = append(keep, id)
+	}
+	m.order = keep
+}
+
 // Get 查询任务（返回快照，避免外部拿到内部指针）。
 func (m *taskManager) Get(id string) *upgradeTask {
 	m.mu.Lock()
@@ -143,6 +198,27 @@ func (m *taskManager) Get(id string) *upgradeTask {
 		return snapshotTask(t)
 	}
 	return nil
+}
+
+// sweep 定期清扫过期终态任务（由 worker 在每轮任务结束时调用）。
+// 与 evictLocked 的区别：sweep 不强依赖数量超限，只清「过期且终态」的。
+func (m *taskManager) sweep() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.order) == 0 {
+		return
+	}
+	cutoff := time.Now().Add(-taskRetention)
+	keep := m.order[:0]
+	for _, id := range m.order {
+		t := m.tasks[id]
+		if t != nil && (t.Phase == PhaseSuccess || t.Phase == PhaseFailed) && t.UpdatedAt.Before(cutoff) {
+			delete(m.tasks, id)
+			continue
+		}
+		keep = append(keep, id)
+	}
+	m.order = keep
 }
 
 // snapshotTask 拷贝任务状态（去掉 run 闭包）。
@@ -346,24 +422,24 @@ func (s *Server) UpgradeApply(w http.ResponseWriter, r *http.Request) {
 
 	srv := s
 	task := s.Tasks.Submit(modeOf(hasSvc), "ota", req.Name, svcVersionOr(hasSvc, &def), entry.Version,
-		func(t *upgradeTask) error {
-			return srv.runOtaTask(t, entry, base)
+		func(ctx context.Context, t *upgradeTask) error {
+			return srv.runOtaTask(ctx, t, entry, base)
 		})
 	ok(w, map[string]any{"taskId": task.ID, "mode": task.Mode})
 }
 
 // runOtaTask OTA 任务：下载 → 校验 → 部署流水线。
-func (s *Server) runOtaTask(t *upgradeTask, entry *pack.IndexEntry, base string) error {
+func (s *Server) runOtaTask(ctx context.Context, t *upgradeTask, entry *pack.IndexEntry, base string) error {
 	s.Tasks.updatePhase(t, PhaseDownloading, entry.URL)
-	pkgPath, err := s.otaDownload(entry, base)
+	pkgPath, err := s.otaDownload(ctx, entry, base)
 	if err != nil {
 		return fmt.Errorf("下载失败: %w", err)
 	}
-	return s.runDeployPipeline(t, pkgPath, "ota")
+	return s.runDeployPipeline(ctx, t, pkgPath, "ota")
 }
 
 // otaDownload 下载包到 data/upgrade-download/ 并校验整包 sha256（S4）。
-func (s *Server) otaDownload(entry *pack.IndexEntry, base string) (string, error) {
+func (s *Server) otaDownload(ctx context.Context, entry *pack.IndexEntry, base string) (string, error) {
 	cfg := s.Settings.Get()
 	timeout := cfg.OTA.TimeoutSec
 	if timeout <= 0 {
@@ -376,7 +452,12 @@ func (s *Server) otaDownload(entry *pack.IndexEntry, base string) (string, error
 			u = bu.ResolveReference(ru).String()
 		}
 	}
-	resp, err := client.Get(u)
+	// 请求绑定 ctx：任务超时取消时立刻中断下载，不留悬挂连接。
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -407,6 +488,11 @@ func (s *Server) otaDownload(entry *pack.IndexEntry, base string) (string, error
 	if closeErr != nil {
 		_ = os.Remove(tmp)
 		return "", closeErr
+	}
+	// 下载完成后再确认一次任务未被取消：避免超时任务继续推进到部署阶段。
+	if err := ctx.Err(); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("任务已取消: %w", err)
 	}
 	if entry.SizeBytes > 0 && n != entry.SizeBytes {
 		_ = os.Remove(tmp)
@@ -473,7 +559,9 @@ func (s *Server) UpgradeLocal(w http.ResponseWriter, r *http.Request) {
 
 	var def store.Service
 	hasSvc := s.DB.First(&def, "name = ?", name).Error == nil
-	if hasSvc && def.Version == version {
+	// 语义化比较：1.0.0 与 1.0.0+build.1 视为同版本（构建元数据不参与比较），
+	// 与 check/apply 的判定口径保持一致。
+	if hasSvc && pack.MustCompareSemVer(version, def.Version) == 0 {
 		// 同版本重装允许（幂等，D3 语义是"不一致即可升"，同版本需要显式确认）。
 		_ = os.RemoveAll(stageDir)
 		fail(w, http.StatusConflict, fmt.Sprintf("当前已是 %s；安装相同版本请先卸载或使用新版本号", version))
@@ -482,8 +570,8 @@ func (s *Server) UpgradeLocal(w http.ResponseWriter, r *http.Request) {
 
 	srv := s
 	task := s.Tasks.Submit(modeOf(hasSvc), "local", name, svcVersionOr(hasSvc, &def), version,
-		func(t *upgradeTask) error {
-			err := srv.runDeployPipeline(t, pkgPath, "local")
+		func(ctx context.Context, t *upgradeTask) error {
+			err := srv.runDeployPipeline(ctx, t, pkgPath, "local")
 			// 安装引用的暂存目录用后即清（含失败路径）。
 			_ = os.RemoveAll(stageDir)
 			return err

@@ -64,6 +64,22 @@ func InitRoot(root string) {
 	}
 }
 
+// ResetRootForTest 重置数据根定型状态（仅测试使用）。
+//
+// 生产代码不得调用：Root() 的「进程内恒定」是受管进程登记、服务仓库路径等
+// 一切落盘位置一致性的前提。测试需要为每个用例准备独立数据根，否则多个
+// 用例共享 CWD 下的 services/ 目录会互相污染（实测导致断言误判）。
+func ResetRootForTest(root string) {
+	rootMu.Lock()
+	defer rootMu.Unlock()
+	rootOnce = sync.Once{}
+	rootResolved = ""
+	rootOverride = root
+	if root != "" {
+		rootOnce.Do(func() { rootResolved = root })
+	}
+}
+
 // Root 返回数据根目录（进程内恒定，已定型）。
 // 可能是相对路径（CWD 兜底分支）或绝对路径（exec 目录 / 显式指定分支）。
 func Root() string {
@@ -244,14 +260,6 @@ func Validate(app App) []Issue {
 		add("collect.downsample", "降采样策略需为 none/two-level")
 	}
 	return issues
-}
-
-func parseOctet(s string) int {
-	n := 0
-	for i := 0; i < len(s); i++ {
-		n = n*10 + int(s[i]-'0')
-	}
-	return n
 }
 
 // LogOptions 把持久化设置转换为日志管理器参数（保存设置后热应用）。

@@ -419,47 +419,51 @@
         <form id="sm-form" onsubmit="return false" autocomplete="off">
 
           <div class="form-section-divider"><span><i class="bi bi-info-circle me-1"></i>基本信息</span></div>
+          <!-- 三行等宽三列（4-4-4）：各输入框等高、上下严格对齐。
+               字段说明由 label 旁的 ? 图标承载（tooltip），不占版面高度。
+               第三行仅两个开关，右侧一格留空保持网格整齐。 -->
           <div class="row g-3">
-            <div class="col-md-5">
-              <label class="form-label fw-semibold" for="sm-name">服务名称 <span class="text-danger">*</span></label>
-              <input type="text" class="form-control" id="sm-name" oninput="markSmNameTouched()" placeholder="如：energy-gateway（英文标识，常填可执行程序名）">
-              <div class="form-text" id="sm-name-hint">唯一标识，用作安装目录名；上传主程序后可自动填充</div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold" for="sm-name">服务名称 <span class="text-danger">*</span><span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="唯一标识，同时用作安装目录名；仅小写字母/数字/._-，最长 64">?</span></label>
+              <input type="text" class="form-control" id="sm-name" oninput="markSmNameTouched()" placeholder="">
             </div>
-            <div class="col-md-5">
-              <label class="form-label fw-semibold" for="sm-summary">摘要</label>
-              <input type="text" class="form-control" id="sm-summary" maxlength="40" oninput="markSmSummaryTouched()" placeholder="如：数据采集网关（简短描述，可中文）">
-              <div class="form-text">卡片上显示的名称，留空则显示服务名称；上传主程序后可自动填充</div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold" for="sm-summary">摘要<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="卡片上显示的名称，可中文，最长 40 字；留空则显示服务名称">?</span></label>
+              <input type="text" class="form-control" id="sm-summary" maxlength="40" oninput="markSmSummaryTouched()" placeholder="数据采集网关">
             </div>
-            <div class="col-md-2">
-              <label class="form-label fw-semibold" for="sm-serviceType">类型</label>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold" for="sm-serviceType">类型<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="仅作分类标注，不影响监管行为">?</span></label>
               <select class="form-select" id="sm-serviceType">
                 <option value="native">自研</option>
                 <option value="opensource">开源</option>
               </select>
             </div>
-            <div class="col-md-4 d-none" id="sm-version-wrap">
-              <label class="form-label fw-semibold" for="sm-version">初始版本 <span class="text-danger">*</span></label>
-              <input type="text" class="form-control" id="sm-version" value="1.0.0">
+
+            <div class="col-md-4" id="sm-version-wrap">
+              <label class="form-label fw-semibold" for="sm-version">初始版本 <span class="text-danger">*</span><span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="语义化版本：主.次.修订（如 1.0.0）；此前缀 +build 等元数据不参与版本比较">?</span></label>
+              <input type="text" class="form-control" id="sm-version" value="0.0.0" placeholder="0.0.0">
             </div>
-            <div class="col-md-5">
-              <label class="form-label fw-semibold" for="sm-webUrl">独立 Web 地址</label>
-              <input type="text" class="form-control" id="sm-webUrl" placeholder="http://192.168.10.20:8210（可选）">
+            <div class="col-md-4">
+              <label class="form-label fw-semibold" for="sm-webUrl">独立 Web 地址<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="可选。服务自带的 Web 控制台地址；填写后卡片上可直接跳转">?</span></label>
+              <input type="text" class="form-control" id="sm-webUrl" placeholder="http://127.0.0.1:8080">
             </div>
-            <div class="col-md-3">
-              <label class="form-label fw-semibold" for="sm-priority">优先级</label>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold" for="sm-priority">优先级<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="数值越小越先启动，顺序编排">?</span></label>
               <input type="number" class="form-control" id="sm-priority" value="100">
-              <div class="form-text">越小越先启动</div>
             </div>
-            <div class="col-md-2 d-flex align-items-center">
+
+            <div class="col-md-4 sm-switch-cell">
+              <label class="form-label fw-semibold d-block">启用监管<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="关闭后平台不启动、不探活该服务，卡片显示为「已停用」">?</span></label>
               <div class="form-check form-switch">
                 <input class="form-check-input" type="checkbox" id="sm-enabled" checked>
-                <label class="form-check-label small" for="sm-enabled" title="关闭后不监管、不出现在运行态">启用监管</label>
+                <label class="form-check-label small" for="sm-enabled">纳入平台监管</label>
               </div>
             </div>
-            <div class="col-md-2 d-flex align-items-center">
+            <div class="col-md-4 sm-switch-cell">
+              <label class="form-label fw-semibold d-block">开机自启<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="平台启动后按优先级顺序自动拉起该服务">?</span></label>
               <div class="form-check form-switch">
                 <input class="form-check-input" type="checkbox" id="sm-autoStart" checked>
-                <label class="form-check-label small" for="sm-autoStart" title="设备开机后按优先级顺序自动拉起">开机自启</label>
+                <label class="form-check-label small" for="sm-autoStart">随平台启动</label>
               </div>
             </div>
           </div>
@@ -469,20 +473,29 @@
             <div class="form-section-divider"><span><i class="bi bi-box-seam me-1"></i>安装文件</span></div>
             <div class="row g-3">
               <div class="col-md-6">
-                <label class="form-label fw-semibold" for="sm-file-main">主程序 <span class="text-danger">*</span></label>
+                <label class="form-label fw-semibold" for="sm-file-main">主程序 <span class="text-danger">*</span><span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="服务的可执行文件。Windows 选 .exe；Linux 选与本机架构匹配的二进制">?</span></label>
                 <input type="file" class="form-control" id="sm-file-main" onchange="onSmFilesPick('main', this)">
-                <div class="form-text" id="sm-file-main-name">可执行文件（Windows 运行选 .exe；Linux 选本机架构）</div>
+                <div class="form-text" id="sm-file-main-name"></div>
                 <div class="invalid-feedback">必须选择主程序文件</div>
               </div>
               <div class="col-md-6">
-                <label class="form-label fw-semibold" for="sm-file-extras">依赖文件</label>
+                <label class="form-label fw-semibold" for="sm-file-extras">依赖文件<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="dll / so / 静态库等运行时依赖；落盘到服务目录的 dependencies/ 子目录">?</span></label>
                 <input type="file" class="form-control" id="sm-file-extras" multiple onchange="onSmFilesPick('extras', this)">
-                <div class="form-text" id="sm-file-extras-name">dll / so / 静态库等 → dependencies/ 目录</div>
+                <div class="form-text" id="sm-file-extras-name"></div>
               </div>
               <div class="col-md-6">
-                <label class="form-label fw-semibold" for="sm-file-config">初始配置文件</label>
+                <label class="form-label fw-semibold" for="sm-file-config">初始配置文件<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="可选。落盘到 config/ 目录；启动参数里用 -c config/文件名 引用">?</span></label>
                 <input type="file" class="form-control" id="sm-file-config" onchange="onSmFilesPick('config', this)">
-                <div class="form-text" id="sm-file-config-name">可选 → config/ 目录，参数用 <code>-c config/文件名</code> 引用</div>
+                <div class="form-text" id="sm-file-config-name"></div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold" for="sm-arch">目标架构<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="可执行文件的编译架构。留空不校验；选择后会解析文件头核对，与本机不符则拒绝安装">?</span></label>
+                <select class="form-select" id="sm-arch">
+                  <option value="">跟随本机</option>
+                  <option value="amd64">amd64(x86_64)</option>
+                  <option value="arm64">arm64(aarch64)</option>
+                  <option value="arm">arm32</option>
+                </select>
               </div>
             </div>
           </div>
@@ -490,11 +503,11 @@
           <div class="form-section-divider"><span><i class="bi bi-terminal me-1"></i>启动命令</span></div>
           <div class="row g-3">
             <div class="col-md-6">
-              <label class="form-label fw-semibold" for="sm-args">参数（每行一个）</label>
-              <textarea class="form-control" id="sm-args" rows="3" placeholder="-c&#10;conf/xxx.json"></textarea>
+              <label class="form-label fw-semibold" for="sm-args">参数<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="启动参数，每行一个。相对路径以服务工作目录（data/服务名）为基准">?</span></label>
+              <textarea class="form-control" id="sm-args" rows="3" placeholder="-c&#10;config/app.conf"></textarea>
             </div>
             <div class="col-md-6">
-              <label class="form-label fw-semibold" for="sm-env">环境变量（每行 KEY=VALUE）</label>
+              <label class="form-label fw-semibold" for="sm-env">环境变量<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="每行一个 KEY=VALUE；与系统环境合并，同名覆盖">?</span></label>
               <textarea class="form-control" id="sm-env" rows="3" placeholder="CAIRN_LOG_LEVEL=info"></textarea>
             </div>
           </div>
@@ -502,56 +515,53 @@
           <div class="form-section-divider"><span><i class="bi bi-arrow-repeat me-1"></i>重启策略</span></div>
           <div class="row g-3">
             <div class="col-md-4">
-              <label class="form-label fw-semibold" for="sm-restartMode">异常退出后</label>
+              <label class="form-label fw-semibold" for="sm-restartMode">异常退出后<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="退避重启：重试间隔指数增长（推荐）；周期重启：按固定间隔反复拉起">?</span></label>
               <select class="form-select" id="sm-restartMode" onchange="onSmRestartModeChange()">
                 <option value="backoff">退避重启（推荐）</option>
                 <option value="periodic">周期重启</option>
               </select>
             </div>
             <div class="col-md-4 d-none" id="sm-periodic-wrap">
-              <label class="form-label fw-semibold" for="sm-periodicSec">固定周期</label>
+              <label class="form-label fw-semibold" for="sm-periodicSec">固定周期<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="两次重启之间的固定等待时间，最小 3 秒">?</span></label>
               <div class="input-group"><input type="number" class="form-control" id="sm-periodicSec" min="3" value="3"><span class="input-group-text">s</span></div>
-              <div class="form-text">最小 3s</div>
             </div>
             <div class="col-md-4" id="sm-backoffBase-wrap">
-              <label class="form-label fw-semibold" for="sm-backoffBase">起始间隔</label>
+              <label class="form-label fw-semibold" for="sm-backoffBase">起始间隔<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="首次重试的等待秒数，此后按 2 的幂次递增">?</span></label>
               <div class="input-group"><input type="number" class="form-control" id="sm-backoffBase" min="1" value="2"><span class="input-group-text">s</span></div>
             </div>
             <div class="col-md-4" id="sm-backoffMax-wrap">
-              <label class="form-label fw-semibold" for="sm-backoffMax">间隔上限</label>
+              <label class="form-label fw-semibold" for="sm-backoffMax">间隔上限<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="退避间隔的封顶值，避免无限增长">?</span></label>
               <div class="input-group"><input type="number" class="form-control" id="sm-backoffMax" min="1" value="300"><span class="input-group-text">s</span></div>
             </div>
             <div class="col-md-4">
-              <label class="form-label fw-semibold" for="sm-maxRetries">窗口内最大重试</label>
+              <label class="form-label fw-semibold" for="sm-maxRetries">窗口内最大重试<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="窗口期内允许的重启次数上限，超限即熔断（停止自动重启，等待人工介入）。0 = 不限">?</span></label>
               <div class="input-group"><input type="number" class="form-control" id="sm-maxRetries" min="0" value="0"><span class="input-group-text">次</span></div>
-              <div class="form-text">0 = 不限，用尽熔断</div>
             </div>
             <div class="col-md-4">
-              <label class="form-label fw-semibold" for="sm-windowSec">熔断窗口</label>
+              <label class="form-label fw-semibold" for="sm-windowSec">熔断窗口<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="统计失败次数的滑动时间窗口。0 = 不限（累计计数）">?</span></label>
               <div class="input-group"><input type="number" class="form-control" id="sm-windowSec" min="0" value="0"><span class="input-group-text">s</span></div>
-              <div class="form-text">0 = 不限</div>
             </div>
           </div>
 
           <div class="form-section-divider"><span><i class="bi bi-journal-text me-1"></i>日志策略</span></div>
           <div class="row g-3">
             <div class="col-md-3">
-              <label class="form-label fw-semibold" for="sm-logMode">方式</label>
+              <label class="form-label fw-semibold" for="sm-logMode">方式<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="标准输出：由平台接管并纳入平台日志视图；文件：服务自行写入指定文件并轮转">?</span></label>
               <select class="form-select" id="sm-logMode" onchange="onSmLogModeChange()">
                 <option value="stdout">标准输出</option>
                 <option value="file">文件</option>
               </select>
             </div>
             <div class="col-md-5">
-              <label class="form-label fw-semibold" for="sm-logPath">日志路径</label>
+              <label class="form-label fw-semibold" for="sm-logPath">日志路径<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="方式为「文件」时必填；相对路径以服务工作目录（data/服务名）为基准">?</span></label>
               <input type="text" class="form-control" id="sm-logPath" disabled placeholder="标准输出由平台统一收集">
             </div>
             <div class="col-md-2">
-              <label class="form-label fw-semibold" for="sm-logMaxSizeMB">单文件上限</label>
+              <label class="form-label fw-semibold" for="sm-logMaxSizeMB">单文件上限<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="单个日志文件的最大体积，超出后轮转">?</span></label>
               <div class="input-group"><input type="number" class="form-control" id="sm-logMaxSizeMB" min="1" value="10"><span class="input-group-text">MB</span></div>
             </div>
             <div class="col-md-2">
-              <label class="form-label fw-semibold" for="sm-logMaxBackups">保留份数</label>
+              <label class="form-label fw-semibold" for="sm-logMaxBackups">保留份数<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="历史日志文件的保留数量，超出后删除最旧的">?</span></label>
               <input type="number" class="form-control" id="sm-logMaxBackups" min="1" value="3">
             </div>
           </div>
