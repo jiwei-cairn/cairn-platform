@@ -9,6 +9,7 @@ package fork
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"time"
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
 	"github.com/jiwei-cairn/cairn-platform/internal/runtime"
+	"github.com/jiwei-cairn/cairn-platform/internal/svclog"
 )
 
 // stopGrace Stop 未显式给超时的默认宽限（与文档停止序列一致）。
@@ -176,9 +178,13 @@ func (r *Runtime) Start(name string, timeout time.Duration) error {
 	cmd.WaitDelay = 3 * time.Second // 进程死后管道最多等 3s（防子进程持有句柄卡 Wait）
 	job := newJob()                 // Windows：进程树 Job Object（停止一次终结整树）
 	cmd.SysProcAttr = sysProcAttr(job)
+	// 输出双写：tailBuffer 承担崩溃取证（D4，每次启动重置，行为不变）；
+	// svclog 是日志页出口（环形缓冲 + 平台侧落盘，跨服务重启保留历史）。
 	tail := newTailBuffer(tailLines)
-	cmd.Stdout = tail
-	cmd.Stderr = tail
+	sink := svclog.Attach(def.ServiceID, def.Name, svclog.ParsePolicy(def.LogPolicy))
+	out := io.MultiWriter(tail, sink)
+	cmd.Stdout = out
+	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {
 		closeJob(job)
 		return err

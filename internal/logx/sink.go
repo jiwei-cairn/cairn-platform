@@ -3,11 +3,14 @@ package logx
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
 
 // Entry 是提供给前端出口的一条结构化日志。
+// Msg 为「消息文本 + k=v 属性」拼接（mod 属性除外，单独进 Mod 字段），
+// 否则 HTTP 行只剩一句 "HTTP"、错误行丢了 err，前端拿不到任何诊断信息。
 type Entry struct {
 	Time  time.Time `json:"time"`
 	Level string    `json:"level"`
@@ -92,33 +95,52 @@ type sinkHandler struct {
 	level slog.Level
 	mod   string
 	group string
+	attrs []slog.Attr // WithAttrs 预绑定的属性（mod 除外），Handle 时并入 Msg
 }
 
 func (h *sinkHandler) Enabled(_ context.Context, l slog.Level) bool { return l >= h.level }
 
 func (h *sinkHandler) Handle(_ context.Context, r slog.Record) error {
-	e := Entry{Time: r.Time, Level: r.Level.String(), Msg: r.Message, Mod: h.mod}
+	e := Entry{Time: r.Time, Level: r.Level.String(), Mod: h.mod}
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
-	r.Attrs(func(a slog.Attr) bool {
+	var b strings.Builder
+	b.WriteString(r.Message)
+	writeAttr := func(a slog.Attr) {
 		if a.Key == "mod" {
 			e.Mod = a.Value.String()
-			return false
+			return
 		}
+		b.WriteString(" ")
+		b.WriteString(a.Key)
+		b.WriteString("=")
+		b.WriteString(a.Value.String())
+	}
+	for _, a := range h.attrs {
+		writeAttr(a)
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		writeAttr(a)
 		return true
 	})
+	e.Msg = b.String()
 	h.sink.push(e)
 	return nil
 }
 
 func (h *sinkHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	next := *h
+	merged := make([]slog.Attr, 0, len(h.attrs)+len(attrs))
+	merged = append(merged, h.attrs...)
 	for _, a := range attrs {
 		if a.Key == "mod" {
 			next.mod = a.Value.String()
+			continue
 		}
+		merged = append(merged, a)
 	}
+	next.attrs = merged
 	return &next
 }
 

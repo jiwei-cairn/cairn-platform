@@ -173,8 +173,10 @@ fetch(tftp / usb / manual) → pack 解析+ed25519 验签 → 预检(磁盘/最�
 2. 新增 `GET /api/upgrade/tasks/{taskId}`（apply 是长任务：POST 受理返回 taskId + 任务轮询，不做 SSE；主理人裁决：任务式取代全局 progress 快照，与交互说明/前端方案对齐）；
 3. `configfile` 拆分：PUT=保存(校验+备份)、**新增 POST `.../configfile/apply`**=按 applyMode 生效、
    **新增 POST `.../configfile/history/{bid}/restore`**=恢复指定版本（保存≠生效，现场更安全）；
-4. `GET /api/logs` 统一入口：`service=platform` 即平台自身日志（logx ring），被管服务日志按
-   logPolicy 的 file/stdout 接入（M3）；
+4. `GET /api/logs` 统一入口：`service` 三态——空=all 平台+全部服务合并流（时间归并）、
+   `platform`=平台自身日志（logx ring）、数字=指定服务（svclog：fork 接管的
+   stdout/stderr + 平台侧落盘 logs/services/，按各服务 logPolicy 轮转）。
+   M3 落地决策：只采集标准输出/错误，不 tail 服务自写的日志文件；
 5. `/api/upgrade/apply` 定义互斥语义：同一时刻仅一个升级任务，并发 409；
 6. `/api/services` 列表响应为"定义+运行态"聚合视图（前端列表一次拿全，不用两跳拼装）。
 

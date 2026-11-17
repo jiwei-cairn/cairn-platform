@@ -33,14 +33,14 @@ function logCenterLeave() {
 function fillLogServiceSelect() {
   const sel = el('log-service');
   const cur = sel.value;
-  // 被管服务日志聚合属 M3：后端对这些 service 一律返回 501。
-  // 直接列为 disabled 并注明，避免用户选中后陷入无意义的退避重连。
-  let html = '<option value="">全部服务</option><option value="platform">平台自身（platform）</option>';
+  // 被管服务日志走 svclog（fork 接管 stdout/stderr，平台侧落盘）；选项值为服务 id。
+  // logPolicy.mode=file 的服务同样只有标准输出进日志页（不读服务自写文件）。
+  let html = '<option value="">全部服务（含平台）</option><option value="platform">仅平台自身</option>';
   state.services.forEach(s => {
-    html += '<option value="' + s.id + '" disabled>' + escapeHtml(svcTitle(s)) + '（M3 提供）</option>';
+    html += '<option value="' + s.id + '">' + escapeHtml(svcTitle(s)) + '</option>';
   });
   sel.innerHTML = html;
-  if (cur && sel.querySelector('option[value="' + cur + '"]:not([disabled])')) sel.value = cur;
+  if (cur && sel.querySelector('option[value="' + cur + '"]')) sel.value = cur;
 }
 function onLogServiceChange() { openLogStream(); }
 function onLogLevelChange() { refilterLogs(); }
@@ -60,6 +60,7 @@ function openLogStream() {
   state.log.lines = [];
   state.log.pendingCount = 0;
   state.log.truncated = false;
+  state.log.lastTs = 0;
   logView.rendered = 0;
   setLogLed('off');
   setText('log-conn-text', '连接中…');
@@ -77,9 +78,11 @@ function openLogStream() {
   });
 }
 function startLogStream(svc) {
-  // svc 为空（"全部服务"）即平台自身日志流：后端对 "" 与 "platform" 一视同仁，
-  // 无需单独分支（原先调用的 startLogPlatform 已随 mock 层删除，是遗漏的调用点）。
-  const es = new EventSource('/api/logs/stream?service=' + encodeURIComponent(svc));
+  // svc 为空（"全部服务"）即平台自身日志流：后端对 "" 与 "platform" 一视同仁。
+  // since=快照最新时间戳：初始转储只补快照之后的增量；EventSource 原生重连
+  // 按同一 URL 重放，同样只补断线期间的增量，不会重复已渲染的行。
+  const since = state.log.lastTs ? '&since=' + state.log.lastTs : '';
+  const es = new EventSource('/api/logs/stream?service=' + encodeURIComponent(svc) + since);
   state.log.es = es;
   state.log.lastEventAt = Date.now();
   es.onopen = () => { setLogConnected(); };
@@ -99,6 +102,9 @@ function startLogStream(svc) {
 }
 function handleLogSnapshot(rows) {
   state.log.lines = rows.slice(-logBufferMax());
+  /* 快照最新一行时间戳：开流时作为 since 传给后端，流的初始转储只发更新的行，
+     避免快照 + 初始转储把同一批行渲染两遍（此前每条日志都会出现两次）。 */
+  state.log.lastTs = rows.length ? (rows[rows.length - 1].ts || 0) : 0;
   logView.rendered = 0;
   state.log.needRebuild = false;
   if (state.log.reconnectAttempts > 0) {
@@ -290,12 +296,12 @@ function openLogExport() {
 function fillLeServiceSelect() {
   const sel = el('le-service');
   const cur = state.log.serviceFilter;
-  let html = '<option value="">全部服务</option><option value="platform">平台自身（platform）</option>';
+  let html = '<option value="">全部服务（含平台）</option><option value="platform">仅平台自身</option>';
   state.services.forEach(s => {
-    html += '<option value="' + s.id + '" disabled>' + escapeHtml(svcTitle(s)) + '（M3 提供）</option>';
+    html += '<option value="' + s.id + '">' + escapeHtml(svcTitle(s)) + '</option>';
   });
   sel.innerHTML = html;
-  if (cur && sel.querySelector('option[value="' + cur + '"]:not([disabled])')) sel.value = cur;
+  if (cur && sel.querySelector('option[value="' + cur + '"]')) sel.value = cur;
 }
 function onLeRangeChange() {
   el('le-custom').classList.toggle('d-none', val('le-range') !== 'custom');

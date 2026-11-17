@@ -24,6 +24,7 @@ import (
 	"github.com/jiwei-cairn/cairn-platform/internal/runtime/fork"
 	"github.com/jiwei-cairn/cairn-platform/internal/store"
 	"github.com/jiwei-cairn/cairn-platform/internal/supervisor"
+	"github.com/jiwei-cairn/cairn-platform/internal/svclog"
 	"github.com/jiwei-cairn/cairn-platform/internal/web"
 )
 
@@ -130,6 +131,8 @@ func main() {
 
 	eng.Close()
 	api.StopHostSampler()
+	// 服务日志出口先于 logx 关闭：排空在途落盘队列时的丢弃告警仍可写平台日志。
+	svclog.Shutdown()
 	if err := store.Close(db); err != nil {
 		logger.Error("关闭数据库失败", "err", err)
 	}

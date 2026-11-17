@@ -92,7 +92,7 @@ const state = {
   log: {
     es: null, lines: [], paused: false, pendingCount: 0,
     serviceFilter: '', keyword: '', levelFilter: '', connected: false,
-    reconnectAttempts: 0, truncated: false, needRebuild: false,
+    reconnectAttempts: 0, truncated: false, needRebuild: false, lastTs: 0,
   },
   /* 升级 */
   update: {

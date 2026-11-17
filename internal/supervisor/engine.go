@@ -489,5 +489,6 @@ func toUnitDef(def store.Service) runtime.UnitDef {
 		ServiceID: def.ID, Name: def.Name,
 		ExePath: def.ExePath, Args: args, WorkDir: def.WorkDir, Env: env,
 		AutoStart: def.AutoStart, Enabled: def.Enabled,
+		LogPolicy: []byte(def.LogPolicy),
 	}
 }

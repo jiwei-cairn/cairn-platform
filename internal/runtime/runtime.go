@@ -50,6 +50,7 @@ type UnitDef struct {
 	Env       map[string]string //
 	AutoStart bool              // 开机自启
 	Enabled   bool              // 是否纳入监管
+	LogPolicy []byte            // logPolicy JSON（轮转参数；fork 转交 svclog 出口）
 }
 
 // Runtime 是进程管理器抽象接口：八个生命周期原语（中立命名）。
