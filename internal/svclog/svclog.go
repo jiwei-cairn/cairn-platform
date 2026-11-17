@@ -303,8 +303,9 @@ func All() []*Sink {
 	return out
 }
 
-// Shutdown 关闭全部出口（停落盘协程、关文件句柄）；进程退出前调用。
+// Shutdown 关闭全部出口（停落盘协程、关文件句柄）与配额看门人；进程退出前调用。
 func Shutdown() {
+	stopJanitor()
 	mgrMu.Lock()
 	defer mgrMu.Unlock()
 	for id, s := range sinks {

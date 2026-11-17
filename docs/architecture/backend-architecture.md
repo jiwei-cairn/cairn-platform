@@ -15,7 +15,7 @@
 |-----------|---------|
 | 管理面不依赖 NATS | 平台全仓库 **零 nats import**（CI grep 检查，见 §5）；被管服务指标走本地 gopsutil、日志走本地文件，不经消息总线回传 |
 | 升级原子切换 + 回滚 | update 管线独占 staging→fsync→rename 语义，tftp/usb/manual 只是"获取通道"差异（§1.4） |
-| 日志/指标配额轮转 | 平台日志 lumberjack（logx 既有）；指标表两级降采样 + 行数配额（§2.2 MetricPoint）；被管服务日志按 logPolicy 轮转 |
+| 日志/指标配额轮转 | 平台日志 lumberjack（logx 既有）；指标表两级降采样 + 行数配额（§2.2 MetricPoint）；被管服务日志按 logPolicy 轮转，logs/services/ 总量由 logQuota.servicesTotalMB 配额看门人兜底 |
 | 单体二进制、无构建工具、纯 Go 无 CGO | 沿用五件套；进程管理用 os/exec 直接 fork（M1 决策修订，见 §3.4 与 M1 方案 §0），零第三方依赖，交叉编译不受影响 |
 | 接口化解耦、facade 可替换 | api 层三个 facade（Supervisor/Update/Stats）+ runtime 抽象，**mock 切换的根基**（§4） |
 

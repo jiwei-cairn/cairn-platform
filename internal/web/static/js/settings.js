@@ -9,7 +9,7 @@ let settingsClockTimer = null;
 const SET_NUM = [
   ['ota.timeoutSec', 'set-ota-timeout'],
   ['web.port', 'set-web-port'], ['web.sessionTimeoutMin', 'set-web-session'],
-  ['logQuota.platformMaxMB', 'set-log-maxmb'], ['logQuota.platformMaxBackups', 'set-log-backups'], ['logQuota.retentionDays', 'set-log-days'], ['logQuota.bufferLines', 'set-log-buffer'],
+  ['logQuota.platformMaxMB', 'set-log-maxmb'], ['logQuota.platformMaxBackups', 'set-log-backups'], ['logQuota.retentionDays', 'set-log-days'], ['logQuota.bufferLines', 'set-log-buffer'], ['logQuota.servicesTotalMB', 'set-log-svctotal'],
   ['collect.intervalSec', 'set-collect-interval'], ['collect.keepVersions', 'set-collect-keepversions'], ['collect.dbQuotaMB', 'set-collect-dbquota'],
 ];
 const SET_TEXT = [['ota.serverUrl', 'set-ota-server']];
@@ -109,6 +109,7 @@ function validateSettings(s) {
   if (!(s.logQuota.platformMaxBackups >= 1 && s.logQuota.platformMaxBackups <= 20)) add(idOf('logQuota.platformMaxBackups'), '保留份数需在 1–20');
   if (!(s.logQuota.retentionDays >= 1 && s.logQuota.retentionDays <= 365)) add(idOf('logQuota.retentionDays'), '保留天数需在 1–365 天');
   if (!(s.logQuota.bufferLines >= 500 && s.logQuota.bufferLines <= 5000)) add(idOf('logQuota.bufferLines'), '前端缓冲需在 500–5000 行');
+  if (!(s.logQuota.servicesTotalMB >= 16 && s.logQuota.servicesTotalMB <= 16384)) add(idOf('logQuota.servicesTotalMB'), '服务日志总配额需在 16–16384 MB');
   if (!(s.collect.intervalSec >= 2 && s.collect.intervalSec <= 3600)) add(idOf('collect.intervalSec'), '采集周期需在 2–3600 秒');
   if (!(s.collect.keepVersions >= 1 && s.collect.keepVersions <= 5)) add(idOf('collect.keepVersions'), '版本保留数需在 1–5');
   if (!(s.collect.dbQuotaMB >= 64 && s.collect.dbQuotaMB <= 16384)) add(idOf('collect.dbQuotaMB'), '数据库配额需在 64–16384 MB');

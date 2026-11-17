@@ -169,7 +169,7 @@ func defaultPolicyBlobs() (restart, health, cfg, logp datatypesJSON) {
 	return mustJSON(map[string]any{"mode": "backoff", "maxRetries": 0, "windowSec": 0, "backoffBase": 2, "backoffMax": 60}),
 		mustJSON(map[string]any{"type": "none", "target": "", "intervalSec": 10, "timeoutSec": 3, "readyHoldSec": 5, "failuresThreshold": 3, "degradedRestartSec": 30}),
 		mustJSON(map[string]any{"path": "", "validateCmd": "", "applyMode": "restart", "applyCmd": "", "maxHistory": 10}),
-		mustJSON(map[string]any{"mode": "stdout", "path": "", "maxSizeMB": 10, "maxBackups": 3})
+		mustJSON(map[string]any{"maxSizeMB": 10, "maxBackups": 3})
 }
 
 // SaveService 创建或更新服务定义。

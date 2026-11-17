@@ -80,6 +80,10 @@ func main() {
 	// 主机指标采样：供大盘 sparkline（近 1h 趋势）。节奏取设置项，
 	// 采样器自身对误配做过下限保护，失败不影响服务监管。
 	server.StartHostSampler(settings.Get().Collect.IntervalSec)
+	// 服务日志磁盘配额看门人：配额每轮热读设置，保存即生效（无需重启）。
+	svclog.StartJanitor(config.LogsDir("services"), func() int64 {
+		return int64(settings.Get().LogQuota.ServicesTotalMB) << 20
+	})
 
 	listen := *addr
 	if listen == "" {

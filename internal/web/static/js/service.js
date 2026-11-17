@@ -12,8 +12,8 @@ let smConfirmedClose = false;
 let smUploads = { main: null, extras: [], config: null };
 
 /* ── 表单字段映射（与表单 DOM 一致；精简后无 exePath/workDir/健康检查/依赖/配置文件项） ── */
-const SM_TEXT = { name: 'sm-name', summary: 'sm-summary', webUrl: 'sm-webUrl', version: 'sm-version', argsText: 'sm-args', envText: 'sm-env', logPath: 'sm-logPath' };
-const SM_SELECT = { serviceType: 'sm-serviceType', restartMode: 'sm-restartMode', logMode: 'sm-logMode', arch: 'sm-arch' };
+const SM_TEXT = { name: 'sm-name', summary: 'sm-summary', webUrl: 'sm-webUrl', version: 'sm-version', argsText: 'sm-args', envText: 'sm-env' };
+const SM_SELECT = { serviceType: 'sm-serviceType', restartMode: 'sm-restartMode', arch: 'sm-arch' };
 const SM_NUM = { priority: 'sm-priority', periodicSec: 'sm-periodicSec', maxRetries: 'sm-maxRetries', windowSec: 'sm-windowSec', backoffBase: 'sm-backoffBase', backoffMax: 'sm-backoffMax', logMaxSizeMB: 'sm-logMaxSizeMB', logMaxBackups: 'sm-logMaxBackups' };
 
 function defaultServiceForm() {
@@ -23,7 +23,7 @@ function defaultServiceForm() {
     enabled: true, autoStart: true, priority: 100,
     argsText: '', envText: '',
     restartMode: 'backoff', periodicSec: 3, maxRetries: 0, windowSec: 0, backoffBase: 2, backoffMax: 300,
-    logMode: 'stdout', logPath: '', logMaxSizeMB: 10, logMaxBackups: 3,
+    logMaxSizeMB: 10, logMaxBackups: 3,
   };
 }
 function fillSmForm(f) {
@@ -233,7 +233,7 @@ function openServiceModal(id) {
   const mainInput = el('sm-file-main');
   if (isWindowsPlatform()) mainInput.accept = '.exe,application/octet-stream';
   else mainInput.accept = '';
-  onSmRestartModeChange(); onSmLogModeChange();
+  onSmRestartModeChange();
   setText('sm-title', row ? svcDisplayName(row) : '新建服务');
   const badge = el('sm-state-badge');
   if (row) {
@@ -388,14 +388,6 @@ function onSmRestartModeChange() {
   el('sm-backoffMax-wrap').classList.toggle('d-none', periodic);
 }
 
-function onSmLogModeChange() {
-  const file = val('sm-logMode') === 'file';
-  const input = el('sm-logPath');
-  input.disabled = !file;
-  const example = isWindowsPlatform() ? 'C:\\\\cairn\\\\logs\\xxx.log' : '/var/log/cairn/xxx.log';
-  input.placeholder = file ? example : '标准输出由平台统一收集';
-}
-
 async function loadSvcStats(id) {
   setHtml('sm-stats-body', ['连续运行时长', '累计启动', 'CPU 时间', '网络累计流量'].map(l =>
     '<div class="col-6 col-md-3"><div class="summary-card mini"><div class="val">…</div><div class="lbl">' + l + '</div></div></div>').join(''));
@@ -490,7 +482,7 @@ function buildInstallRequest(f) {
     args, env,
     webUrl: (f.webUrl || '').trim(),
     restartPolicy,
-    logPolicy: { mode: f.logMode, path: (f.logPath || '').trim(), maxSizeMB: toNum(f.logMaxSizeMB, 10), maxBackups: toNum(f.logMaxBackups, 3) },
+    logPolicy: { maxSizeMB: toNum(f.logMaxSizeMB, 10), maxBackups: toNum(f.logMaxBackups, 3) },
     extraFiles: smUploads.extras.map(x => x.name),
   };
   // 目标架构（可选）：留空则不写该字段，后端预检跳过架构校验。

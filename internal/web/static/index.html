@@ -342,6 +342,13 @@
                 <div class="invalid-feedback">前端缓冲需在 500–5000 行</div>
               </div>
             </div>
+            <div class="row g-2">
+              <div class="col-6 settings-field">
+                <label for="set-log-svctotal">服务日志总配额（MB）</label>
+                <input type="number" class="form-control" id="set-log-svctotal" placeholder="512">
+                <div class="invalid-feedback">服务日志总配额需在 16–16384 MB</div>
+              </div>
+            </div>
             <div class="settings-field">
               <label for="set-log-level">平台日志级别</label>
               <select class="form-select" id="set-log-level">
@@ -543,25 +550,14 @@
             </div>
           </div>
 
-          <div class="form-section-divider"><span><i class="bi bi-journal-text me-1"></i>日志策略</span></div>
+          <div class="form-section-divider"><span><i class="bi bi-journal-text me-1"></i>采集日志轮转</span></div>
           <div class="row g-3">
             <div class="col-md-3">
-              <label class="form-label fw-semibold" for="sm-logMode">方式<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="标准输出：由平台接管并纳入平台日志视图；文件：服务自行写文件并轮转，平台日志页仅采集其标准输出">?</span></label>
-              <select class="form-select" id="sm-logMode" onchange="onSmLogModeChange()">
-                <option value="stdout">标准输出</option>
-                <option value="file">文件</option>
-              </select>
-            </div>
-            <div class="col-md-5">
-              <label class="form-label fw-semibold" for="sm-logPath">日志路径<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="方式为「文件」时必填；相对路径以服务工作目录（data/服务名）为基准">?</span></label>
-              <input type="text" class="form-control" id="sm-logPath" disabled placeholder="标准输出由平台统一收集">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label fw-semibold" for="sm-logMaxSizeMB">单文件上限<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="单个日志文件的最大体积，超出后轮转">?</span></label>
+              <label class="form-label fw-semibold" for="sm-logMaxSizeMB">单文件上限<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="平台接管的标准输出落盘文件（logs/services/svc-{id}.log）的单文件体积上限，超出后轮转">?</span></label>
               <div class="input-group"><input type="number" class="form-control" id="sm-logMaxSizeMB" min="1" value="10"><span class="input-group-text">MB</span></div>
             </div>
-            <div class="col-md-2">
-              <label class="form-label fw-semibold" for="sm-logMaxBackups">保留份数<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="历史日志文件的保留数量，超出后删除最旧的">?</span></label>
+            <div class="col-md-3">
+              <label class="form-label fw-semibold" for="sm-logMaxBackups">保留份数<span class="field-hint" tabindex="0" data-bs-toggle="tooltip" title="平台侧历史采集文件的保留数量，超出后删除最旧的；服务自写的日志文件不受平台管理">?</span></label>
               <input type="number" class="form-control" id="sm-logMaxBackups" min="1" value="3">
             </div>
           </div>

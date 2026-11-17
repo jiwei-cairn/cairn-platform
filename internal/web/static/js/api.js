@@ -48,7 +48,6 @@ function serviceFromRow(r) {
     dependsOn: (r.dependsOn || []).map(String),
     cfgPath: cf.path || '', validateCmd: cf.validateCmd || '', applyMode: cf.applyMode || 'restart',
     applyCmd: cf.applyCmd || '', cfgMaxHistory: toNum(cf.maxHistory, 10),
-    logMode: lp.mode || 'stdout', logPath: lp.path || '',
     logMaxSizeMB: toNum(lp.maxSizeMB, 10), logMaxBackups: toNum(lp.maxBackups, 3),
   };
 }
@@ -74,7 +73,7 @@ function serviceToPayload(f) {
     restartPolicy,
     healthCheck: row.healthCheck || { type: 'none' },
     configFile: row.configFile || {},
-    logPolicy: { mode: f.logMode, path: (f.logPath || '').trim(), maxSizeMB: toNum(f.logMaxSizeMB, 10), maxBackups: toNum(f.logMaxBackups, 3) },
+    logPolicy: { maxSizeMB: toNum(f.logMaxSizeMB, 10), maxBackups: toNum(f.logMaxBackups, 3) },
     dependsOn: (row.dependsOn || []).map(Number),
   };
 }

@@ -188,8 +188,9 @@ type LogQuota struct {
 	PlatformMaxMB      int    `json:"platformMaxMB"`
 	PlatformMaxBackups int    `json:"platformMaxBackups"`
 	RetentionDays      int    `json:"retentionDays"`
-	BufferLines        int    `json:"bufferLines"` // 前端环形缓冲条数
-	Level              string `json:"level"`       // debug|info|warn|error
+	BufferLines        int    `json:"bufferLines"`     // 前端环形缓冲条数
+	Level              string `json:"level"`           // debug|info|warn|error
+	ServicesTotalMB    int    `json:"servicesTotalMB"` // 被管服务采集日志总配额（logs/services/ 整体，svclog 看门人兜底）
 }
 
 // Collect 采集统计与版本保留策略。
@@ -212,7 +213,7 @@ func Default() App {
 	return App{
 		OTA:      OTA{ServerURL: "", TimeoutSec: 30},
 		Web:      Web{Port: 1995, SessionTimeoutMin: 30},
-		LogQuota: LogQuota{PlatformMaxMB: 20, PlatformMaxBackups: 5, RetentionDays: 30, BufferLines: 2000, Level: "info"},
+		LogQuota: LogQuota{PlatformMaxMB: 20, PlatformMaxBackups: 5, RetentionDays: 30, BufferLines: 2000, Level: "info", ServicesTotalMB: 512},
 		Collect:  Collect{IntervalSec: 10, Downsample: "two-level", KeepVersions: 2, DBQuotaMB: 512},
 	}
 }
@@ -246,6 +247,7 @@ func Validate(app App) []Issue {
 	rangeIssue("logQuota.platformMaxBackups", app.LogQuota.PlatformMaxBackups >= 1 && app.LogQuota.PlatformMaxBackups <= 20, "保留份数需在 1–20")
 	rangeIssue("logQuota.retentionDays", app.LogQuota.RetentionDays >= 1 && app.LogQuota.RetentionDays <= 365, "保留天数需在 1–365 天")
 	rangeIssue("logQuota.bufferLines", app.LogQuota.BufferLines >= 500 && app.LogQuota.BufferLines <= 5000, "前端缓冲需在 500–5000 行")
+	rangeIssue("logQuota.servicesTotalMB", app.LogQuota.ServicesTotalMB >= 16 && app.LogQuota.ServicesTotalMB <= 16384, "服务日志总配额需在 16–16384 MB")
 	switch app.LogQuota.Level {
 	case "debug", "info", "warn", "error":
 	default:
