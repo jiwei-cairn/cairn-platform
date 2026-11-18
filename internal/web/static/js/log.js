@@ -225,8 +225,15 @@ function flushLogAppend() {
   if (logView.rendered === 0) c.innerHTML = '';
   if (logView.rendered >= lines.length) { updateLogBufferInfo(); return; }
   const near = consoleNearBottom();
+  const kw = state.log.keyword;
+  const lvl = state.log.levelFilter;
+  const omit = !!state.log.serviceFilter;
   let html = '';
-  for (let i = logView.rendered; i < lines.length; i++) html += logLineHtml(lines[i], { keyword: '', omitService: !!state.log.serviceFilter });
+  // 实时追加也必须过级别/关键字过滤（此前新行绕过过滤直接显示，行为不一致）。
+  for (let i = logView.rendered; i < lines.length; i++) {
+    if (!matchesLogFilter(lines[i], kw, lvl)) continue;
+    html += logLineHtml(lines[i], { keyword: kw, omitService: omit });
+  }
   c.insertAdjacentHTML('beforeend', html);
   logView.rendered = lines.length;
   updateLogBufferInfo();

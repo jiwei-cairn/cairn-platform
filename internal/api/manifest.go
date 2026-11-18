@@ -328,9 +328,11 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 	if source == "" {
 		source = "market"
 	}
-	external := strings.TrimSpace(req.Overrides.ExternalPath)
-	if external != "" {
-		m.ExternalRef = true // 说明卡标记：产物不入仓，引用外部路径
+	// 外部引用模式（exePath 指向包外任意路径）已移除：等价于任意命令执行向量，
+	// 且 localBinary 已覆盖「自备二进制」场景——直接拒绝，不落任何文件。
+	if ext := strings.TrimSpace(req.Overrides.ExternalPath); ext != "" {
+		fail(w, http.StatusBadRequest, "externalPath 已禁用，请改用 localBinary 提供产物")
+		return
 	}
 	// 覆盖式升级（decisions.md D5/P1）：安装目录不含版本层，路径恒定；
 	// 服务运行数据在 data/{name}（P2），与产物目录彻底分离。
@@ -349,18 +351,13 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	binPath := filepath.Join(dir, m.Binary)
-	if external == "" {
-		// 产物入仓：确保 bin 子目录存在（复制/占位写入前）。
-		if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
-			s.rollbackInstallDir(dir)
-			fail(w, http.StatusInternalServerError, "创建产物目录失败: "+err.Error())
-			return
-		}
+	// 产物入仓：确保 bin 子目录存在（复制/占位写入前）。
+	if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
+		s.rollbackInstallDir(dir)
+		fail(w, http.StatusInternalServerError, "创建产物目录失败: "+err.Error())
+		return
 	}
 	switch {
-	case external != "":
-		// 外部引用模式：产物不复制，exePath 指向外部路径（调试场景）。
-		binPath = external
 	case strings.TrimSpace(req.Overrides.LocalBinary) != "":
 		if err := copyFile(req.Overrides.LocalBinary, binPath, 0o755); err != nil {
 			s.rollbackInstallDir(dir)

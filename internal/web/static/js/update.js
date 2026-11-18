@@ -125,6 +125,7 @@ const TASK_PHASE_MAP = {
   swapping:   { key: 'switch',   idx: 5 }, /* install+switch 合并为 swapping */
   starting:   { key: 'health',   idx: 6 },
   success:    { key: 'commit',   idx: 7 },
+  failed:     { key: 'commit',   idx: 7 }, /* 终态槽位：失败红点落在最后一步，而非误标下载 */
 };
 function adaptTask(t) {
   const m = TASK_PHASE_MAP[t.phase] || TASK_PHASE_MAP.queued;
@@ -396,7 +397,7 @@ function startLocalUpgrade() {
   if (!file) { showToast('warning', '请选择 .cairnpkg 包文件'); return; }
   const fd = new FormData();
   fd.append('file', file);
-  btnBusy(el('um-confirm') || input, '上传中…');
+  btnBusy(input, '上传中…');
   fetch('/api/upgrade/local', { method: 'POST', body: fd })
     .then(async r => {
       const j = await r.json().catch(() => ({}));
@@ -412,5 +413,6 @@ function startLocalUpgrade() {
       renderTaskBanner();
       showToast('info', '已受理（' + (d.mode === 'upgrade' ? '升级' : '安装') + '），任务执行中');
     })
-    .catch(e => showToast('danger', '上传失败：' + e.message));
+    .catch(e => showToast('danger', '上传失败：' + e.message))
+    .finally(() => btnIdle(input));
 }

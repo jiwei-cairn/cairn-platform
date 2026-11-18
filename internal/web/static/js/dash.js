@@ -43,6 +43,7 @@ async function refreshDashboard() {
 function renderDashAll() {
   const d = state.dashboard;
   if (!d) return;
+  setHtml('dash-state', ''); // 清除首屏加载失败时写入的错误块（此前永不清理）
   const stale = el('dash-stale');
   if (stale && !state.dashboardError) stale.classList.add('d-none');
   setText('dash-refresh-info', '上次刷新 ' + fmtClock(state.dashboardAt) + ' · 自动 ' + dashIntervalSec() + 's');
