@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
@@ -204,6 +205,11 @@ func (s *Server) SaveService(w http.ResponseWriter, r *http.Request) {
 	p.Summary = trimSpace(p.Summary)
 	if utf8.RuneCountInString(p.Summary) > 40 {
 		fail(w, http.StatusBadRequest, "摘要最长 40 个字符")
+		return
+	}
+	// webUrl 只允许 http(s)（前端已校验，后端兜底防直连 API 写入 javascript: 等方案）。
+	if wu := trimSpace(p.WebUrl); wu != "" && !strings.HasPrefix(wu, "http://") && !strings.HasPrefix(wu, "https://") {
+		fail(w, http.StatusBadRequest, "webUrl 必须是 http:// 或 https:// 开头")
 		return
 	}
 	// 重启策略模式收窄为 always|onFailure（架构 §2.2：limited 拆为配额两维）。

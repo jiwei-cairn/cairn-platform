@@ -67,7 +67,12 @@ func main() {
 			http.Error(w, "上传解析失败: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		fh := r.MultipartForm.File["file"][0]
+		files := r.MultipartForm.File["file"]
+		if len(files) == 0 {
+			http.Error(w, "缺少 file 字段", http.StatusBadRequest)
+			return
+		}
+		fh := files[0]
 		src, err := fh.Open()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -410,7 +415,13 @@ func injectBadHash(w http.ResponseWriter, r *http.Request) {
 // injectCorrupt 返回截断一半的包体。
 func injectCorrupt(w http.ResponseWriter, r *http.Request) {
 	rel := strings.TrimPrefix(r.URL.Path, "/cairn/")
-	f, err := os.Open(filepath.Join(*root, "cairn", rel))
+	base := filepath.Join(*root, "cairn")
+	full := filepath.Clean(filepath.Join(base, rel))
+	if rp, err := filepath.Rel(base, full); err != nil || rp == ".." || strings.HasPrefix(rp, ".."+string(filepath.Separator)) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	f, err := os.Open(full)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return

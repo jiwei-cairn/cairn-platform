@@ -80,7 +80,11 @@ func (e *Engine) Init() {
 	}
 	// autoStart 拓扑拉起（认领的跳过）。
 	for _, id := range e.graph.TopoOrder(defs) {
-		def := defs[id2idx(defs, id)]
+		idx := id2idx(defs, id)
+		if idx < 0 {
+			continue // 拓扑序不应出现 defs 之外的 id，兜底防御
+		}
+		def := defs[idx]
 		if def.Enabled && def.AutoStart && !adopted[id] {
 			if w := e.workerByID(id); w != nil {
 				w.send(workerCmd{kind: cmdStart})
@@ -101,7 +105,7 @@ func id2idx(defs []store.Service, id int) int {
 			return i
 		}
 	}
-	return 0
+	return -1
 }
 
 func (e *Engine) dispatch(ew runtime.ExitWatcher) {
@@ -217,9 +221,6 @@ func (e *Engine) Apply(services []store.Service) {
 	}
 	for _, w := range added {
 		w.start()
-		if w.pol.HealthType != "" {
-			// 新增即登记；autoStart 交由启动门控。
-		}
 		if d := e.defByID(w.id); d != nil && d.Enabled && d.AutoStart {
 			w.send(workerCmd{kind: cmdStart})
 		}

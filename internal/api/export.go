@@ -7,6 +7,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	goruntime "runtime"
+	"gorm.io/gorm"
 )
 
 // ExportService GET /api/services/{id}/export：导出当前服务为 .cairnpkg。
@@ -32,7 +34,11 @@ func (s *Server) ExportService(w http.ResponseWriter, r *http.Request) {
 	}
 	var def store.Service
 	if err := s.DB.First(&def, "id = ?", id).Error; err != nil {
-		fail(w, http.StatusNotFound, "服务不存在")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			fail(w, http.StatusNotFound, "服务不存在")
+		} else {
+			fail(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 	if strings.TrimSpace(def.Version) == "" {

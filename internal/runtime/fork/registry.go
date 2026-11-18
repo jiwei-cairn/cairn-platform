@@ -38,7 +38,6 @@ func (r *Runtime) saveReg(u *unit) {
 	}
 	exe := u.def.ExePath
 	u.mu.Unlock()
-	_ = e.Name
 	b, err := json.MarshalIndent(e, "", "  ")
 	if err != nil {
 		return
@@ -47,7 +46,14 @@ func (r *Runtime) saveReg(u *unit) {
 		logx.Module("fork").Warn("登记目录创建失败", "dir", r.root, "err", err)
 		return
 	}
-	if err := os.WriteFile(r.regPath(e.Name), b, 0o644); err != nil {
+	// 原子写（临时文件 + 改名）：崩溃留下损坏 JSON 会让认领误判为未登记。
+	tmp := r.regPath(e.Name) + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		logx.Module("fork").Warn("单元登记落盘失败", "unit", e.Name, "exe", exe, "err", err)
+		return
+	}
+	if err := os.Rename(tmp, r.regPath(e.Name)); err != nil {
+		_ = os.Remove(tmp)
 		logx.Module("fork").Warn("单元登记落盘失败", "unit", e.Name, "exe", exe, "err", err)
 	}
 }

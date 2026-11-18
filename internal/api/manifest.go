@@ -618,7 +618,9 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
 	_, err = io.Copy(out, in)
+	if cerr := out.Close(); err == nil {
+		err = cerr // io.Copy 成功但 Close 失败（如磁盘满）也要向上报错
+	}
 	return err
 }
