@@ -166,6 +166,14 @@ func (e *Engine) Apply(services []store.Service) {
 			acts = append(acts, action{update: &d, restart: restart})
 		}
 	}
+	// 删除前按旧图快照依赖方停止顺序：重建图后依赖边会被当作悬空引用丢弃，
+	// 依赖方将不再被停——这是删除服务前停其依赖方的唯一可靠时机。
+	stopOrders := make(map[int][]int)
+	for _, a := range acts {
+		if a.remove != 0 {
+			stopOrders[a.remove] = stopOrderForGraph(e.graph, a.remove, services)
+		}
+	}
 	// 先在锁内更新 defs/graph 快照（worker 增删在锁外执行后回写）。
 	var removed []*worker
 	for _, a := range acts {
@@ -198,7 +206,11 @@ func (e *Engine) Apply(services []store.Service) {
 
 	// 锁外执行 worker 侧动作。
 	for _, w := range removed {
-		e.stopDependents(w.id)
+		for _, x := range stopOrders[w.id] {
+			if dw := e.workerByID(x); dw != nil {
+				dw.send(workerCmd{kind: cmdStop})
+			}
+		}
 		w.send(workerCmd{kind: cmdDispose})
 		_ = e.rt.RemoveUnit(unitKey(w.id))
 		e.event("info", "stop", w.id, w.defName(), "服务已删除，移除监管")
@@ -304,7 +316,7 @@ func (e *Engine) Close() {
 	deadline := time.After(15 * time.Second)
 	for _, w := range workers {
 		select {
-		case <-w.stopDone:
+		case <-w.stopDoneCh():
 			// 该 worker 已停止
 		case <-deadline:
 			logx.Module("supervisor").Warn("等待服务停止超时，强制退出", "id", w.id, "name", w.defName())
@@ -384,6 +396,13 @@ func (e *Engine) stopOrderFor(id int) []int {
 		defs = append(defs, d)
 	}
 	e.mu.Unlock()
+	return append(stopOrderForGraph(g, id, defs), id)
+}
+
+// stopOrderForGraph 用指定图与定义计算依赖方停止顺序（逆拓扑序，不含目标本身）。
+// 供 Apply 删除服务时在旧图上快照——重建后依赖边会被当作悬空引用丢弃，
+// 依赖方将不再被停。
+func stopOrderForGraph(g *Graph, id int, defs []store.Service) []int {
 	closure := map[int]bool{id: true}
 	for _, x := range g.DependentsClosure(id) {
 		closure[x] = true
@@ -395,19 +414,7 @@ func (e *Engine) stopOrderFor(id int) []int {
 			order = append(order, topo[i])
 		}
 	}
-	return append(order, id)
-}
-
-// stopDependents 删除服务前停其依赖方。
-func (e *Engine) stopDependents(id int) {
-	for _, x := range e.stopOrderFor(id) {
-		if x == id {
-			continue
-		}
-		if w := e.workerByID(x); w != nil {
-			w.send(workerCmd{kind: cmdStop})
-		}
-	}
+	return order
 }
 
 func (e *Engine) defByID(id int) *store.Service {

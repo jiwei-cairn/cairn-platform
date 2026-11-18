@@ -99,17 +99,18 @@ type worker struct {
 	curMemMB      float64
 	curCpuTimeSec float64
 
-	stopDone chan struct{} // doStop 完成信号（Close 等待用）
-	stopOnce sync.Once
+	stopDone chan struct{} // 停止完成信号（初始已关闭；doStart 重开、doStop 幂等关闭）
 
 	row store.ServiceRuntime
 }
 
 func newWorker(eng *Engine, def store.Service, row store.ServiceRuntime) *worker {
+	done := make(chan struct{})
+	close(done) // 初始「已停止」：Close 对从未启动的 worker 立即返回
 	w := &worker{
 		id: def.ID, eng: eng, rt: eng.rt,
 		cmdCh:    make(chan workerCmd, workerCmdBuf),
-		stopDone: make(chan struct{}),
+		stopDone: done,
 		def:      def,
 		pol:      ParsePolicy(def),
 		st:       StateStopped, row: row,
@@ -249,6 +250,11 @@ func (w *worker) tryLaunch() {
 		w.failAttempt("fork 失败: " + err.Error())
 		return
 	}
+	// 进程已拉起：重开停止信号——Close 据此判断有进程需等待停止；restart 后
+	// 二次停止也能被感知（修复 stopOnce 单次语义在 restart 后失效的缺陷）。
+	w.mu.Lock()
+	w.stopDone = make(chan struct{})
+	w.mu.Unlock()
 	st, _ := w.rt.Status(unitKey(w.id))
 	w.mu.Lock()
 	w.pid = st.MainPID
@@ -262,7 +268,7 @@ func (w *worker) doStop(reason string) {
 	w.mu.Lock()
 	if w.st == StateStopped || w.st == StateFailed {
 		w.mu.Unlock()
-		w.stopOnce.Do(func() { close(w.stopDone) }) // 已停止也发完成信号
+		w.signalStopDone() // 已停止也发完成信号
 		return
 	}
 	name := w.def.Name
@@ -282,11 +288,31 @@ func (w *worker) doStop(reason string) {
 	if stopErr != nil {
 		w.eng.event("error", "stop", w.id, name, "停止失败: "+stopErr.Error())
 		w.transition(StateFailed, "error", "alert", "停止失败，进程可能仍在运行: %s", stopErr.Error())
-		w.stopOnce.Do(func() { close(w.stopDone) })
+		w.signalStopDone()
 		return
 	}
 	w.transition(StateStopped, "info", "stop", "已停止: %s", reason)
-	w.stopOnce.Do(func() { close(w.stopDone) }) // 停止完成信号
+	w.signalStopDone() // 停止完成信号
+}
+
+// signalStopDone 幂等关闭停止信号。初始为已关闭（未启动即视为已停止），
+// doStart 拉起进程时重开、doStop 完成时关闭；每次 close 的都是「当前打开」
+// 的通道，restart 循环里不会双重 close panic。
+func (w *worker) signalStopDone() {
+	w.mu.Lock()
+	select {
+	case <-w.stopDone:
+	default:
+		close(w.stopDone)
+	}
+	w.mu.Unlock()
+}
+
+// stopDoneCh 返回当前停止信号（锁内读取，避免与 doStart 重开通道竞争）。
+func (w *worker) stopDoneCh() chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.stopDone
 }
 
 // onExit 进程事实 → 监管裁决（九态折叠核心）。
