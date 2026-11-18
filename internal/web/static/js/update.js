@@ -311,16 +311,18 @@ function renderRecords() {
   st.innerHTML = '';
   const locked = upgradeLocked();
   tb.innerHTML = rows.map(r => {
-    const [badgeCls, label] = RECORD_STATUS[r.status] || ['badge-muted', r.status];
+    // 后端 UpgradeRecords 返回 {id, level, serviceId, message, at}（EventLog 口径）；
+    // 旧实现读 createdAt/serviceName/fromVersion/toVersion/source/status 全错配。
+    const lvl = { info: ['badge-ok', '成功'], warn: ['badge-w', '警告'], error: ['badge-err', '失败'] }[r.level] || ['badge-muted', r.level || '—'];
+    const svc = svcById(r.serviceId);
+    const svcName = svc ? svcTitle(svc) : ('#' + r.serviceId);
     // 覆盖式升级无多版本目录，回退 = 重新上传旧版包（decisions.md B6/D1）。
     let action = '<button class="btn btn-outline-secondary btn-sm" onclick="promptLocalRollback(' + r.serviceId + ')" title="通过上传旧版本包回退"><i class="bi bi-arrow-counterclockwise me-1"></i>旧版重装</button>';
     return '<tr>' +
-      '<td class="text-nowrap">' + fmtDateTime(r.createdAt) + '</td>' +
-      '<td class="fw-semibold">' + escapeHtml(r.serviceName || '#' + r.serviceId) + '</code></td>' +
-      '<td><code>' + escapeHtml(r.fromVersion) + '</code> → <code>' + escapeHtml(r.toVersion) + '</code></td>' +
-      '<td><span class="mc-tag">' + (UPGRADE_SOURCE[r.source] || r.source) + '</span></td>' +
-      '<td><span class="badge ' + badgeCls + '">' + label + '</span>' +
-        (r.detail ? '<div class="text-muted small" style="max-width:260px;" title="' + escapeHtml(r.detail) + '">' + escapeHtml(r.detail) + '</div>' : '') + '</td>' +
+      '<td class="text-nowrap">' + fmtDateTime(r.at) + '</td>' +
+      '<td><span class="badge ' + lvl[0] + '">' + lvl[1] + '</span></td>' +
+      '<td class="fw-semibold">' + escapeHtml(svcName) + '</td>' +
+      '<td class="text-muted" style="max-width:420px;" title="' + escapeHtml(r.message) + '">' + escapeHtml(r.message) + '</td>' +
       '<td class="text-end text-nowrap">' + action + '</td>' +
       '</tr>';
   }).join('');

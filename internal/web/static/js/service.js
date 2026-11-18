@@ -156,7 +156,7 @@ function cardHtml(s) {
     : { up: fmtUptime(rt.uptimeSec), starts: rt.restartTotal ?? '—', cpu: fmtPct(rt.cpuPct), mem: fmtMB(rt.memMB) };
   const btn = (id, iconCls, title, fn, enabled, extraCls) =>
     '<button class="btn ' + (extraCls || 'btn-outline-secondary') + ' btn-sm" onclick="' + fn + '" ' + (enabled ? '' : 'disabled ') +
-    'title="' + title + '" aria-label="' + title + '"><i class="bi ' + iconCls + '"></i></button>';
+    'title="' + escapeHtml(title) + '" aria-label="' + escapeHtml(title) + '"><i class="bi ' + iconCls + '"></i></button>';
   const titleHtml = s.webUrl
     ? '<a class="svc-name-link" href="' + escapeHtml(s.webUrl) + '" target="_blank" rel="noopener" title="穿越到 ' + escapeHtml(s.webUrl) + '"><span class="led ' + meta.led + '"></span>' + escapeHtml(title) + '<i class="bi bi-box-arrow-up-right ms-1"></i></a>'
     : '<span class="led ' + meta.led + '"></span>' + escapeHtml(title);
@@ -188,7 +188,7 @@ function cardHtml(s) {
       nameTag +
       '<span class="mc-tag iface">' + (RESTART_MODE_LABEL[(s.restartPolicy || {}).mode] || '退避重启') + '</span>' +
       '<span class="mc-tag">' + (s.version ? escapeHtml(s.version) : '未安装') + '</span>' +
-      (avail ? '<span class="mc-tag mc-tag-up" title="OTA 可用版本">可升级 ' + escapeHtml(avail.version) + '</span>' : '') +
+      (avail ? '<span class="mc-tag mc-tag-up" title="OTA 可用版本">可升级 ' + escapeHtml(avail.latest) + '</span>' : '') +
       (s.webUrl ? '<span class="mc-tag mc-tag-web" title="' + escapeHtml(s.webUrl) + '"><i class="bi bi-window me-1"></i>独立 Web</span>' : '') +
       '<span class="mc-tag">' + (SERVICE_TYPE_LABEL[s.serviceType] || '自研') + '</span>' +
     '</div>' +
@@ -569,7 +569,9 @@ function watchSvcTransition(id, act) {
     tries++;
     await loadServices(true);
     const row = svcById(id);
-    const st = row ? rtState(row) : null;
+    // 直接读后端真实运行态，不经过 rtState 的乐观覆盖——否则成功/失败分支
+    // 永远不可达（乐观值恒为 starting/stopping），只能跑满 8 次静默清除。
+    const st = row && row.runtime ? row.runtime.state : null;
     if (st === target) {
       clearInterval(timer);
       delete state.optimistic[id];

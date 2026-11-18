@@ -6,6 +6,7 @@
 let logFlushTimer = null;
 let logReconnectTimer = null;
 let logWatchdog = null;
+let logStreamSeq = 0; // 代际号：切换服务/离开区块后旧异步回调据此失效
 const logView = { rendered: 0 };
 const LOG_BACKOFF = [2000, 4000, 8000, 16000, 30000];
 
@@ -55,6 +56,7 @@ function closeLogStreamConn() {
 }
 function openLogStream() {
   closeLogStreamConn();
+  const seq = ++logStreamSeq; // 本次打开代际：旧 .then 回调据此失效
   const svc = el('log-service').value;
   state.log.serviceFilter = svc;
   state.log.lines = [];
@@ -69,9 +71,11 @@ function openLogStream() {
   updateLogBufferInfo();
   const query = '/logs?service=' + encodeURIComponent(svc) + '&limit=200';
   apiGet(query).then(rows => {
+    if (seq !== logStreamSeq) return; // 已切换到新流/已离开区块，丢弃过期快照
     handleLogSnapshot(rows || []);
     startLogStream(svc);
   }).catch(() => {
+    if (seq !== logStreamSeq) return;
     /* 快照失败也尝试拉起流（重连横幅由流错误路径接管） */
     startLogStream(svc);
     onStreamError();
