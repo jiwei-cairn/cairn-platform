@@ -115,7 +115,6 @@ function switchSection(key) {
   el('nav-' + key).classList.add('active');
   if (['dash', 'service'].includes(key)) dashboardStartPolling(); else dashboardStopPolling();
   if (key === 'service') { renderServiceCards(); updateStartPolling(); } else updateStopPolling();
-  if (key === 'dash') sparkStart(); else sparkStop();
   if (key === 'market') marketEnter(); else marketLeave();
   if (key === 'log') logCenterEnter(); else logCenterLeave();
   if (key === 'settings') settingsEnter(); else settingsLeave();

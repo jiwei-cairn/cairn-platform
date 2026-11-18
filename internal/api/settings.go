@@ -63,9 +63,6 @@ func (s *Server) SaveSettings(w http.ResponseWriter, r *http.Request) {
 				needRestart = append(needRestart, needRestartItem{Field: path, Label: label})
 				continue
 			}
-			if path == "web.sessionTimeoutMin" && prev.Web.Port != next.Web.Port {
-				continue // web.port 变更时会话超时随重启生效，不再单列
-			}
 			applied = append(applied, path)
 		}
 	}

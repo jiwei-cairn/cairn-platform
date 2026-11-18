@@ -8,12 +8,12 @@ let settingsClockTimer = null;
 /* 字段映射（路径 ↔ DOM ID，camelCase 全链路一致） */
 const SET_NUM = [
   ['ota.timeoutSec', 'set-ota-timeout'],
-  ['web.port', 'set-web-port'], ['web.sessionTimeoutMin', 'set-web-session'],
+  ['web.port', 'set-web-port'],
   ['logQuota.platformMaxMB', 'set-log-maxmb'], ['logQuota.platformMaxBackups', 'set-log-backups'], ['logQuota.retentionDays', 'set-log-days'], ['logQuota.bufferLines', 'set-log-buffer'], ['logQuota.servicesTotalMB', 'set-log-svctotal'],
-  ['collect.intervalSec', 'set-collect-interval'], ['collect.keepVersions', 'set-collect-keepversions'], ['collect.dbQuotaMB', 'set-collect-dbquota'],
+  ['collect.intervalSec', 'set-collect-interval'],
 ];
 const SET_TEXT = [['ota.serverUrl', 'set-ota-server']];
-const SET_SELECT = [['logQuota.level', 'set-log-level'], ['collect.downsample', 'set-collect-downsample']];
+const SET_SELECT = [['logQuota.level', 'set-log-level']];
 const SET_BOOL = [];
 
 function getPath(obj, path) { return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj); }
@@ -104,15 +104,12 @@ function validateSettings(s) {
   if (!(s.ota.timeoutSec >= 5 && s.ota.timeoutSec <= 120)) add(idOf('ota.timeoutSec'), 'OTA 超时需在 5–120 秒');
   const port = (p, label) => { if (!(s[p.split('.')[0]] && s[p.split('.')[0]][p.split('.')[1]] >= 1 && s[p.split('.')[0]][p.split('.')[1]] <= 65535)) add(idOf(p), label + '需在 1–65535 之间'); };
   port('web.port', 'Web 监听端口');
-  if (!(s.web.sessionTimeoutMin >= 5 && s.web.sessionTimeoutMin <= 1440)) add(idOf('web.sessionTimeoutMin'), '会话超时需在 5–1440 分钟');
   if (!(s.logQuota.platformMaxMB >= 1 && s.logQuota.platformMaxMB <= 512)) add(idOf('logQuota.platformMaxMB'), '单文件上限需在 1–512 MB');
   if (!(s.logQuota.platformMaxBackups >= 1 && s.logQuota.platformMaxBackups <= 20)) add(idOf('logQuota.platformMaxBackups'), '保留份数需在 1–20');
   if (!(s.logQuota.retentionDays >= 1 && s.logQuota.retentionDays <= 365)) add(idOf('logQuota.retentionDays'), '保留天数需在 1–365 天');
   if (!(s.logQuota.bufferLines >= 500 && s.logQuota.bufferLines <= 5000)) add(idOf('logQuota.bufferLines'), '前端缓冲需在 500–5000 行');
   if (!(s.logQuota.servicesTotalMB >= 16 && s.logQuota.servicesTotalMB <= 16384)) add(idOf('logQuota.servicesTotalMB'), '服务日志总配额需在 16–16384 MB');
-  if (!(s.collect.intervalSec >= 2 && s.collect.intervalSec <= 3600)) add(idOf('collect.intervalSec'), '采集周期需在 2–3600 秒');
-  if (!(s.collect.keepVersions >= 1 && s.collect.keepVersions <= 5)) add(idOf('collect.keepVersions'), '版本保留数需在 1–5');
-  if (!(s.collect.dbQuotaMB >= 64 && s.collect.dbQuotaMB <= 16384)) add(idOf('collect.dbQuotaMB'), '数据库配额需在 64–16384 MB');
+  if (!(s.collect.intervalSec >= 5 && s.collect.intervalSec <= 3600)) add(idOf('collect.intervalSec'), '采集周期需在 5–3600 秒');
   return issues;
 }
 function clearSetInvalid() {
@@ -160,15 +157,18 @@ async function saveSettings() {
 }
 function showSetRestartBanner(res) {
   const banner = el('set-restart-banner');
+  const bar = el('set-restart-bar');
   const need = res.needRestart || [];
   el('set-web-restart-badge').classList.toggle('d-none', !need.some(n => n.field === 'web.port'));
   if (!need.length) {
     banner.classList.add('d-none');
+    if (bar) bar.classList.add('d-none');
     showToast('success', '设置已保存并生效');
     return;
   }
   const labels = need.map(n => '<b>' + escapeHtml(n.label || SET_FIELD_LABEL[n.field] || n.field) + '</b>').join('、');
   banner.innerHTML = '<i class="bi bi-info-circle-fill me-2" style="color:var(--primary)"></i>以下字段已保存，重启平台后生效：' + labels;
   banner.classList.remove('d-none');
+  if (bar) bar.classList.remove('d-none');
   showToast('warning', '设置已保存：其余字段已热应用，重启平台后生效：' + need.map(n => n.label || n.field).join('、'));
 }

@@ -134,7 +134,7 @@ func (s *Server) runDeployPipeline(ctx context.Context, t *upgradeTask, pkgPath,
 
 	// ── 换文件 ──
 	s.Tasks.updatePhase(t, PhaseSwapping, "切换文件（旧产物 → .old，配置 → .bak）")
-	swapped, err := s.materialize(svcDir, staging, m, t.Mode)
+	swapped, err := s.materialize(svcDir, staging, m)
 	if err != nil {
 		// 失败回滚已换入的文件（文件级可逆）。
 		s.rollbackSwap(swapped)
@@ -142,20 +142,27 @@ func (s *Server) runDeployPipeline(ctx context.Context, t *upgradeTask, pkgPath,
 		return err
 	}
 
+	// ── 数据目录（安装时创建；升级不触碰内容，E2）──
+	// 先于落库：失败时整体回滚文件、DB 不落任何行——否则升级场景 DB 已指向
+	// 新版本而磁盘是旧文件，安装场景留下指向不存在 exePath 的幽灵行。
+	if err := os.MkdirAll(dataDirOf(m.Name), 0o755); err != nil {
+		s.rollbackSwap(swapped)
+		_ = os.RemoveAll(staging)
+		return fmt.Errorf("创建数据目录失败（服务将无法启动）: %w", err)
+	}
+
 	// ── 落库：安装 = 新建行；升级 = 更新行 ──
+	// 这是部署的点之无归：成功后不再做任何需要回滚的可逆文件操作。
 	if err := s.upsertServiceDef(&def, hasSvc, m, source); err != nil {
 		s.rollbackSwap(swapped)
 		_ = os.RemoveAll(staging)
 		return err
 	}
 
-	// ── 数据目录（安装时创建；升级不触碰内容，E2）──
-	// 失败必须阻断：工作目录不存在会让服务启动必然失败，
-	// 若继续返回 success，用户会看到「部署成功」但服务起不来。
-	if err := os.MkdirAll(dataDirOf(m.Name), 0o755); err != nil {
-		s.rollbackSwap(swapped)
-		_ = os.RemoveAll(staging)
-		return fmt.Errorf("创建数据目录失败（服务将无法启动）: %w", err)
+	// ── 升级：清理旧版独有、新版没有的产物文件 ──
+	// 必须在落库成功后执行：删除不可逆，落库失败时回滚无需（也无法）还原它们。
+	if t.Mode == "upgrade" {
+		s.pruneStaleDependencies(svcDir, m)
 	}
 
 	// ── 发起启动（D10：指令发出即任务收尾，不等待运行结果）──
@@ -186,7 +193,7 @@ type swappedFile struct {
 
 // materialize 把 staging 内容换入正式位置。
 // 返回已执行的换名记录（回滚依据）。
-func (s *Server) materialize(svcDir, staging string, m *pack.Manifest, mode string) ([]swappedFile, error) {
+func (s *Server) materialize(svcDir, staging string, m *pack.Manifest) ([]swappedFile, error) {
 	var swapped []swappedFile
 
 	newPaths := make(map[string]pack.FileEntry, len(m.Files))
@@ -243,11 +250,6 @@ func (s *Server) materialize(svcDir, staging string, m *pack.Manifest, mode stri
 	})
 	if err != nil {
 		return swapped, err
-	}
-
-	// 升级模式：清理旧版独有、新版没有的 dependency 文件（防残留堆积）。
-	if mode == "upgrade" {
-		s.pruneStaleDependencies(svcDir, m)
 	}
 
 	// manifest.json 留存（当前版本清单快照，导出与排障用）。

@@ -83,9 +83,11 @@ body { margin: 0; background: var(--bg); min-height: 100vh; font-family: -apple-
 .section-header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
 /* ── Settings cards ── */
-.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-items: start; gap: 18px; }
+/* 设置卡片瀑布流：CSS 多列按卡片自然高度纵向堆叠（与市场页同模式），
+   列宽 340px 起按可用宽度自动分列（1–3 列）。 */
+.settings-grid { columns: 340px; column-gap: 18px; }
 .settings-column { min-width: 0; }
-.settings-card { width: 100%; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 14px; box-shadow: var(--card-shadow); padding: 20px; }
+.settings-card { width: 100%; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 14px; box-shadow: var(--card-shadow); padding: 20px; break-inside: avoid; margin: 0 0 18px; }
 .settings-card-head { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color); }
 .settings-card-head i { color: var(--primary); font-size: 19px; }
 .settings-card-title { font-weight: 700; color: var(--text-strong); }
@@ -324,22 +326,17 @@ mark.log-hit { background: var(--hit-bg); color: inherit; padding: 0 1px; border
    只按自然高度排版，面板被撑高后底部留白。 */
 .host-metrics > .data-panel { display: flex; flex-direction: column; }
 .host-metrics-rows { display: flex; flex-direction: column; justify-content: space-between; gap: 10px; flex: 1 1 auto; min-height: 0; }
-/* 左列取弹性宽（1fr）：进度条占满趋势小图以外的全部面板内宽，
-   与右侧小图（上限 240px）+ 16px 间距合计恰好填满指标卡——
-   此前左列固定 200px，宽屏下面板右侧会留大片空白。 */
 .host-metric {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 240px);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto;
   align-items: center;
-  column-gap: 16px;
   row-gap: 7px;
   min-width: 0;
   flex: 0 1 auto;
 }
 .host-metric-head { grid-column: 1; grid-row: 1; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12.5px; color: var(--muted-color); }
 .host-metric-head .fw-semibold { font-size: 15px; color: var(--text-strong); }
-.spark-scope { font-size: 11.5px; font-weight: 400; color: var(--muted-color); margin-left: 4px; }
 
 /* ── 左栏信息卡（系统运行时长 / 网络流量） ──
    两卡不再强制等分：运行时长卡内容少（3 行），网络流量卡内容多（4 行），
@@ -379,44 +376,20 @@ mark.log-hit { background: var(--hit-bg); color: inherit; padding: 0 1px; border
 .host-side-totals .tot.tx .bi { color: var(--warning); }
 .host-side-totals .tot b { font-weight: 600; color: var(--text-body); }
 
-/* 上行/下行速率：各带方向图标，颜色与下方双线 Sparkline 一一对应 */
+/* 上行/下行速率：各带方向图标，颜色仅表示方向（下行=主色 / 上行=琥珀） */
 .host-side-rates { display: flex; align-items: center; gap: 12px; font-size: 13px; }
 .host-side-rates .rate { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; color: var(--text-strong); white-space: nowrap; }
 .host-side-rates .rate .bi { font-size: 10px; }
 .host-side-rates .rate.rx .bi { color: var(--primary); }
 .host-side-rates .rate.tx .bi { color: var(--warning); }
-.host-side-spark { min-width: 0; }
-.host-side-spark .spark-svg { height: 20px; }
-
-/* 双线 Sparkline：下行=主色、上行=琥珀。此处两色表示方向而非状态，
-   故不参与 is-warn / is-err 阈值着色（沿用 :root 令牌，不新增硬编码色） */
-.spark-svg .spark-line-rx { fill: none; stroke: var(--primary); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.spark-svg .spark-line-tx { fill: none; stroke: var(--warning); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.spark-svg .spark-area-rx { fill: var(--primary); opacity: .12; stroke: none; }
-.host-side-spark .spark-empty { height: 20px; }
 
 /* 进度条：CPU/内存正常绿 / >60% 琥珀 / >80% 红（与阈值语义一致）；
-   磁盘不参与阈值着色，取中性色（与右侧趋势小图同色） */
+   磁盘不参与阈值着色，取中性色 */
 .host-metric-bar { grid-column: 1; grid-row: 2; height: 6px; border-radius: 20px; background: var(--stat-bg); }
 .host-metric-bar .progress-bar { background: var(--success); border-radius: 20px; transition: width .4s ease; }
 .host-metric-bar .progress-bar.is-warn { background: var(--warning); }
 .host-metric-bar .progress-bar.is-err { background: var(--danger); }
 .host-metric.is-neutral .host-metric-bar .progress-bar { background: var(--neutral-metric); }
-
-/* 趋势小图：跨两行占右侧列，尺寸小于左侧（高 28px） */
-.host-spark { grid-column: 2; grid-row: 1 / -1; min-width: 0; }
-.spark-svg { display: block; width: 100%; height: 28px; background: var(--stat-bg); border-radius: 6px; }
-.spark-svg .spark-line { fill: none; stroke: var(--success); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.spark-svg .spark-area { fill: var(--success); opacity: .14; stroke: none; }
-.spark-empty { display: flex; align-items: center; justify-content: center; height: 28px; font-size: 11px; color: var(--muted-color); background: var(--stat-bg); border-radius: 6px; }
-/* 告警色：CPU/内存与进度条阈值一致；磁盘行（is-neutral）见下方中性色，不参与阈值着色 */
-.host-metric.is-warn .spark-line { stroke: var(--warning); }
-.host-metric.is-warn .spark-area { fill: var(--warning); }
-.host-metric.is-err .spark-line { stroke: var(--danger); }
-.host-metric.is-err .spark-area { fill: var(--danger); }
-/* 中性色：磁盘等长期偏高的指标，线+填充与进度条保持同色 */
-.host-metric.is-neutral .spark-line { stroke: var(--neutral-metric); }
-.host-metric.is-neutral .spark-area { fill: var(--neutral-metric); }
 
 /* 窄屏：左栏两卡改为横向并排（堆叠在指标卡之上），避免两列过窄；
    两卡等分一行，仍保持「两卡合计 = 一行指标」的等比关系。 */
@@ -426,7 +399,6 @@ mark.log-hit { background: var(--hit-bg); color: inherit; padding: 0 1px; border
   .host-side-card { padding: 10px 11px; gap: 6px; }
   .host-side-val { font-size: 17px; }
   .host-metrics-rows { justify-content: flex-start; gap: 10px; }
-  .host-metric { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 10px; }
   .host-metric-head { flex-direction: column; align-items: flex-start; gap: 2px; }
 }
 

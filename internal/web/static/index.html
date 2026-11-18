@@ -67,8 +67,8 @@
           <span class="ms-auto small text-muted"><i class="bi bi-shield-lock me-1"></i>平台自守护：<span id="dash-platform-daemon">—</span> · 只读，不参与纳管监管</span>
         </div>
 
-        <!-- 系统运行指标：左列两张卡（整机运行时长 / 网络流量）+ 右列使用率指标面板。
-             左列两卡由 grid 拉伸，故纵向长度合计恒等于右侧指标卡的纵向长度。 -->
+        <!-- 系统运行指标：左列两张卡（整机运行时长 / 网络流量）+ 右列使用率指标面板
+             （实时值 + 进度条；趋势曲线已随「指标不落库」决策移除）。 -->
         <div class="host-metrics mt-3">
           <div class="host-metrics-aside">
             <div class="host-side-card">
@@ -82,7 +82,6 @@
                 <span class="rate rx"><i class="bi bi-arrow-down"></i><span id="dash-net-rx-rate">—</span></span>
                 <span class="rate tx"><i class="bi bi-arrow-up"></i><span id="dash-net-tx-rate">—</span></span>
               </div>
-              <div class="host-side-spark" id="dash-spark-net"></div>
               <div class="host-side-totals">
                 <div class="tot rx"><i class="bi bi-arrow-down"></i><span>累计</span><b id="dash-net-rx-total">—</b></div>
                 <div class="tot tx"><i class="bi bi-arrow-up"></i><span>累计</span><b id="dash-net-tx-total">—</b></div>
@@ -90,22 +89,19 @@
             </div>
           </div>
           <div class="data-panel">
-            <div class="panel-title"><i class="bi bi-cpu" style="color:var(--primary)"></i>系统性能指标 <span class="spark-scope">近 1 小时趋势</span></div>
+            <div class="panel-title"><i class="bi bi-cpu" style="color:var(--primary)"></i>系统性能指标</div>
             <div class="host-metrics-rows">
               <div class="host-metric">
                 <div class="host-metric-head"><span>CPU 使用率</span><span class="fw-semibold" id="dash-m-cpu">—</span></div>
                 <div class="progress host-metric-bar"><div class="progress-bar" id="dash-m-cpu-bar" role="progressbar" style="width:0%"></div></div>
-                <div class="host-spark" id="dash-spark-cpu"></div>
               </div>
               <div class="host-metric">
                 <div class="host-metric-head"><span>内存使用率</span><span class="fw-semibold" id="dash-m-mem">—</span></div>
                 <div class="progress host-metric-bar"><div class="progress-bar" id="dash-m-mem-bar" role="progressbar" style="width:0%"></div></div>
-                <div class="host-spark" id="dash-spark-mem"></div>
               </div>
               <div class="host-metric">
                 <div class="host-metric-head"><span>磁盘使用率</span><span class="fw-semibold" id="dash-m-disk">—</span></div>
                 <div class="progress host-metric-bar"><div class="progress-bar" id="dash-m-disk-bar" role="progressbar" style="width:0%"></div></div>
-                <div class="host-spark" id="dash-spark-disk"></div>
               </div>
             </div>
           </div>
@@ -275,9 +271,12 @@
 
       <!-- ═══════════ ◆ section-settings 设置 ═══════════ -->
       <section id="section-settings" class="app-section d-none">
-        <div class="section-header">
-          <h4><i class="bi bi-gear me-2" style="color:var(--primary)"></i>设置</h4>
-          <div class="sub">平台模块自身配置，保存后按字段热应用或提示重启</div>
+        <div class="section-header section-header-row">
+          <div>
+            <h4><i class="bi bi-gear me-2" style="color:var(--primary)"></i>设置</h4>
+            <div class="sub">平台模块自身配置，保存后按字段热应用或提示重启</div>
+          </div>
+          <button class="btn btn-primary text-nowrap" id="set-save" onclick="saveSettings()"><i class="bi bi-check-lg me-1"></i>保存设置</button>
         </div>
         <div id="set-state"></div>
         <div class="settings-grid mt-3 d-none" id="set-cards">
@@ -307,16 +306,11 @@
               <input type="number" class="form-control" id="set-web-port" placeholder="8090">
               <div class="invalid-feedback">端口需在 1–65535 之间</div>
             </div>
-            <div class="settings-field">
-              <label for="set-web-session">会话超时（分钟）</label>
-              <input type="number" class="form-control" id="set-web-session" placeholder="30">
-              <div class="invalid-feedback">会话超时需在 5–1440 分钟</div>
-            </div>
           </div>
 
           <div class="settings-card">
             <div class="settings-card-head"><i class="bi bi-journal-text"></i>
-              <div><div class="settings-card-title">日志配额</div><div class="settings-card-sub">平台日志轮转与前端缓冲</div></div>
+              <div><div class="settings-card-title">日志配额</div><div class="settings-card-sub">平台与服务日志的轮转、缓冲与级别</div></div>
             </div>
             <div class="row g-2">
               <div class="col-6 settings-field">
@@ -362,32 +356,12 @@
 
           <div class="settings-card">
             <div class="settings-card-head"><i class="bi bi-graph-up-arrow"></i>
-              <div><div class="settings-card-title">采集与存储</div><div class="settings-card-sub">指标采样与版本保留</div></div>
+              <div><div class="settings-card-title">指标采集</div><div class="settings-card-sub">大盘主机资源实时值的采样节拍（重启平台后生效）</div></div>
             </div>
             <div class="settings-field">
-              <label for="set-collect-interval">指标采集周期（秒）</label>
-              <input type="number" class="form-control" id="set-collect-interval" placeholder="10">
-              <div class="invalid-feedback">采集周期需在 2–3600 秒</div>
-            </div>
-            <div class="settings-field">
-              <label for="set-collect-downsample">降采样策略</label>
-              <select class="form-select" id="set-collect-downsample">
-                <option value="two-level">两级（1min×24h + 5min×7d）</option>
-                <option value="short">仅短期（1min×24h）</option>
-                <option value="off">关闭（仅实时值）</option>
-              </select>
-            </div>
-            <div class="row g-2">
-              <div class="col-6 settings-field">
-                <label for="set-collect-keepversions">版本保留数</label>
-                <input type="number" class="form-control" id="set-collect-keepversions" placeholder="2">
-                <div class="invalid-feedback">版本保留数需在 1–5</div>
-              </div>
-              <div class="col-6 settings-field">
-                <label for="set-collect-dbquota">数据库配额（MB）<span class="text-muted" style="font-size:11.5px"> · 暂未生效</span></label>
-                <input type="number" class="form-control" id="set-collect-dbquota" placeholder="512">
-                <div class="invalid-feedback">数据库配额需在 64–16384 MB</div>
-              </div>
+              <label for="set-collect-interval">采集周期（秒）</label>
+              <input type="number" class="form-control" id="set-collect-interval" placeholder="5">
+              <div class="invalid-feedback">采集周期需在 5–3600 秒</div>
             </div>
           </div>
 
@@ -404,9 +378,9 @@
           </div>
         </div>
 
-        <div class="sticky-save-bar">
-          <div class="info-banner d-none" id="set-restart-banner" role="status"></div>
-          <button class="btn btn-primary text-nowrap" id="set-save" onclick="saveSettings()"><i class="bi bi-check-lg me-1"></i>保存设置</button>
+        <!-- 重启提示条：仅在保存了需重启的字段时出现（保存按钮已移至页面头部右上角） -->
+        <div class="sticky-save-bar d-none" id="set-restart-bar">
+          <div class="info-banner" id="set-restart-banner" role="status"></div>
         </div>
       </section>
 

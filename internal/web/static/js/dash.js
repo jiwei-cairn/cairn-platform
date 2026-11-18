@@ -14,7 +14,7 @@ const DASH_FILTERS = [
 ];
 
 function dashIntervalSec() {
-  return (state.settings && state.settings.collect && toNum(state.settings.collect.intervalSec, 10)) || 10;
+  return (state.settings && state.settings.collect && toNum(state.settings.collect.intervalSec, 5)) || 5;
 }
 function dashboardStartPolling() {
   if (dashTimer) return;
@@ -50,172 +50,12 @@ function renderDashAll() {
   renderDashOverview();
   renderDashServices(); // 服务运行状态表（原运行页功能，与大盘同源合并渲染；
   // 原异常置顶表已并入：点「异常」卡或筛选即可得到原置顶表的行与告警原因）
-  renderHostSparks(); // 重绘 sparkline（当前值着色/窗口右移），不额外发请求
   if (currentSection === 'service') renderServiceCards();
 }
-/* ══════════════ 主机指标 sparkline（近 1 小时） ══════════════
-
-数据源 GET /api/dashboard/host-metrics?range=1h（后端按窗口桶聚合到 ≤120 点）。
-绘制用内联 SVG，遵循「不引图表库」的既定约定。
-
-刷新节奏与大盘解耦：大盘 10s 轮询，但 sparkline 每分钟才新增约 6 个采样点，
-故每 60s 拉取一次即可，避免每 10s 重复拉取时序 JSON。 */
-
-const SPARK_RANGE = '1h';
-const SPARK_REFRESH_MS = 60000; // 数据拉取节流（后端采样默认 10s，曲线按分钟变化）
-let sparkTimer = null;
-let sparkFetchedAt = 0;
-let sparkCache = { cpu: [], mem: [], disk: [], rx: [], tx: [] }; // metric -> number[]
-
-/* 触发一次 sparkline 数据拉取（带节流：SPARK_REFRESH_MS 内不重复请求）。 */
-function refreshHostSparks(force) {
-  if (currentSection !== 'dash') return;
-  const now = Date.now();
-  if (!force && sparkFetchedAt && now - sparkFetchedAt < SPARK_REFRESH_MS) {
-    renderHostSparks(); // 已有数据：仅重绘（窗口右移 + 当前值着色）
-    return;
-  }
-  sparkFetchedAt = now;
-  apiGet('/dashboard/host-metrics?range=' + SPARK_RANGE).then(v => {
-    const pts = (v && v.points) || [];
-    ['cpu', 'mem', 'disk'].forEach(m => {
-      sparkCache[m] = pts.map(p => Number(p[m]) || 0);
-    });
-    /* 网络速率与使用率共用同一份时序响应，无需第二个请求 */
-    sparkCache.rx = pts.map(p => Number(p.rxKBps) || 0);
-    sparkCache.tx = pts.map(p => Number(p.txKBps) || 0);
-    renderHostSparks();
-  }).catch(() => {
-    /* 静默：sparkline 是增强信息，失败不打扰用户（大盘自身会呈现错误态） */
-    renderHostSparks();
-  });
-}
-function sparkStart() {
-  refreshHostSparks(true);
-  sparkTimer = startPolling(refreshHostSparks, SPARK_REFRESH_MS);
-}
-function sparkStop() { sparkTimer = stopPolling(sparkTimer); }
-
-/* renderHostSparks 重绘三行趋势小图（每行一张）。 */
-function renderHostSparks() {
-  ['cpu', 'mem', 'disk'].forEach(metric => {
-    const host = el('dash-spark-' + metric);
-    if (!host) return;
-    const pts = sparkCache[metric] || [];
-    /* 行级状态类：CPU/内存按阈值着色（>60% 琥珀 / >80% 红，与左侧进度条同源——
-       颜色类来自 sparkLevelClass，是否着色由 metricNeutral 决定，两侧判断始终一致）；
-       磁盘恒为中性色（is-neutral），不参与阈值着色。 */
-    const row = host.closest('.host-metric');
-    if (row) {
-      row.classList.remove('is-warn', 'is-err', 'is-neutral');
-      if (metricNeutral(metric)) row.classList.add('is-neutral');
-      else {
-        const lvl = sparkLevelClass(currentMetricPct(metric));
-        if (lvl) row.classList.add(lvl);
-      }
-    }
-    host.innerHTML = pts.length
-      ? sparkSvg(pts)
-      : '<div class="spark-empty">暂无趋势数据</div>';
-  });
-  renderNetSpark();
-}
-
-/* renderNetSpark 重绘「网络流量」卡的双线小图（下行=主色 / 上行=琥珀）。
-   与三行使用率小图共用 sparkCache，故不额外发请求。 */
-function renderNetSpark() {
-  const host = el('dash-spark-net');
-  if (!host) return;
-  const rx = sparkCache.rx || [], tx = sparkCache.tx || [];
-  host.innerHTML = rx.length
-    ? sparkSvgDual(rx, tx)
-    : '<div class="spark-empty">暂无趋势数据</div>';
-}
-
-/* currentMetricPct 当前实时值（用于着色与曲线末尾标注）。 */
-function currentMetricPct(metric) {
-  const o = (state.dashboard && state.dashboard.overview) || {};
-  if (metric === 'cpu') return o.hostCpuPct;
-  if (metric === 'mem') return o.hostMemPct;
-  return o.hostDiskPct;
-}
-
 /* metricNeutral 该指标是否不参与阈值着色。
    磁盘使用率在嵌入式设备上长期偏高，染红只会变成噪声，故取中性色；
-   setMetricValue（进度条）与 renderHostSparks（趋势图）共用此判定，避免两侧不一致。 */
+   setMetricValue（进度条）据此判定行级 is-neutral 与进度条配色。 */
 function metricNeutral(metric) { return metric === 'disk'; }
-
-/* sparkLevelClass 告警分级：>80% 红 / >60% 琥珀。
-   仅用于非中性指标（见 metricNeutral）；与左侧进度条使用同一阈值，两侧颜色始终一致。 */
-function sparkLevelClass(pct) {
-  if (pct === null || pct === undefined || isNaN(pct)) return '';
-  if (pct > 80) return 'is-err';
-  if (pct > 60) return 'is-warn';
-  return '';
-}
-
-/* sparkSvg 把数值序列画成折线 + 浅填充。
-   坐标系用固定 viewBox（100×40），实际显示尺寸交给 CSS 拉伸到列宽——
-   这样小图宽度自适应而无需在 JS 里测量布局（避免 resize 重算）。
-   Y 轴固定 0–100（使用率语义），使三列曲线可直接横向比较；
-   仅当数据全在 0–5 的极低区间时才放大到 0–10，避免一条贴底的直线。 */
-const SPARK_VB_W = 100;
-const SPARK_VB_H = 40;
-function sparkSvg(pts) {
-  const n = pts.length;
-  const maxRaw = Math.max.apply(null, pts);
-  const top = maxRaw <= 5 ? 10 : 100;
-  const x = i => (n === 1 ? SPARK_VB_W / 2 : (i / (n - 1)) * (SPARK_VB_W - 2) + 1);
-  const y = v => SPARK_VB_H - 1 - (clamp(Number(v) || 0, 0, top) / top) * (SPARK_VB_H - 2);
-  let line = '', area = '';
-  for (let i = 0; i < n; i++) {
-    const px = x(i).toFixed(2), py = y(pts[i]).toFixed(2);
-    line += (i ? 'L' : 'M') + px + ' ' + py;
-    area += (i ? 'L' : 'M') + px + ' ' + py;
-  }
-  area += 'L' + x(n - 1).toFixed(2) + ' ' + SPARK_VB_H + 'L' + x(0).toFixed(2) + ' ' + SPARK_VB_H + 'Z';
-  return '<svg class="spark-svg" viewBox="0 0 ' + SPARK_VB_W + ' ' + SPARK_VB_H +
-    '" preserveAspectRatio="none" role="img" aria-label="近 1 小时使用率趋势">' +
-    '<path class="spark-area" d="' + area + '"></path>' +
-    '<path class="spark-line" d="' + line + '"></path></svg>';
-}
-
-/* sparkSvgDual 把两条序列画进同一张图（网络下行/上行）。
-   与 sparkSvg 的关键差别在 Y 轴标度：速率没有 100% 这样的天然上限，
-   用固定量程只会画成贴底直线，故以两条序列的公共最大值定标——
-   共用同一量程才能横向比较上下行（各自定标会让两条线都顶格，看着一样高）。
-   上限留 10% 余量并取整到易读刻度，避免峰值恰好贴顶。
-   量程为 0（无流量）时退回 1，防止除零。 */
-function sparkSvgDual(a, b) {
-  const n = Math.max(a.length, b.length);
-  if (!n) return '';
-  const peak = Math.max(Math.max.apply(null, a.concat([0])), Math.max.apply(null, b.concat([0])));
-  const top = peak > 0 ? niceCeil(peak * 1.1) : 1;
-  const x = i => (n === 1 ? SPARK_VB_W / 2 : (i / (n - 1)) * (SPARK_VB_W - 2) + 1);
-  const y = v => SPARK_VB_H - 1 - (clamp(Number(v) || 0, 0, top) / top) * (SPARK_VB_H - 2);
-  const path = pts => {
-    let d = '';
-    for (let i = 0; i < pts.length; i++) d += (i ? 'L' : 'M') + x(i).toFixed(2) + ' ' + y(pts[i]).toFixed(2);
-    return d;
-  };
-  /* 只给下行线加浅填充：两条填充会互相遮挡，反而看不清趋势 */
-  const areaRx = path(a) + 'L' + x(a.length - 1).toFixed(2) + ' ' + SPARK_VB_H + 'L' + x(0).toFixed(2) + ' ' + SPARK_VB_H + 'Z';
-  const label = '近 1 小时网络速率，峰值 ' + fmtKBps(peak);
-  return '<svg class="spark-svg" viewBox="0 0 ' + SPARK_VB_W + ' ' + SPARK_VB_H +
-    '" preserveAspectRatio="none" role="img" aria-label="' + label + '">' +
-    '<path class="spark-area-rx" d="' + areaRx + '"></path>' +
-    '<path class="spark-line-rx" d="' + path(a) + '"></path>' +
-    '<path class="spark-line-tx" d="' + path(b) + '"></path></svg>';
-}
-
-/* niceCeil 把量程上限抬到易读刻度（1/2/5 × 10^n），使纵轴刻度规整。 */
-function niceCeil(v) {
-  if (!(v > 0)) return 1;
-  const mag = Math.pow(10, Math.floor(Math.log10(v)));
-  const norm = v / mag;
-  const step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
-  return step * mag;
-}
 
 /* ── 平台自身只读条（Q3：展示但不参与监管，无任何操作按钮） ── */
 function renderDashPlatform() {
@@ -238,7 +78,7 @@ function renderDashOverview() {
   const errCard = el('dash-card-err');
   if (errCard) errCard.classList.toggle('is-err', (o.err ?? 0) > 0);
   renderDashFilterChips(); // 筛选 chips 与卡片选中态随计数刷新
-  /* 主机指标：当前值 + 进度条（CPU/内存按阈值着色，磁盘取中性色；趋势图着色见 renderHostSparks） */
+  /* 主机指标：当前值 + 进度条（CPU/内存按阈值着色，磁盘取中性色） */
   setMetricValue('cpu', o.hostCpuPct);
   setMetricValue('mem', o.hostMemPct);
   setMetricValue('disk', o.hostDiskPct);
@@ -263,12 +103,14 @@ function renderDashHostCards(o) {
   setText('dash-net-tx-total', fmtBytes(o.netTxBytes));
 }
 /* setMetricValue 写入当前值文本与进度条宽度/告警色。
-   CPU/内存阈值分级：>60% 琥珀、>80% 红；磁盘走中性色（见 metricNeutral），
-   该判定与趋势图共用，两侧颜色始终一致；无效值显示 — 且条宽归零。 */
+   CPU/内存阈值分级：>60% 琥珀、>80% 红；磁盘走中性色（见 metricNeutral）；
+   无效值显示 — 且条宽归零。 */
 function setMetricValue(kind, pct) {
   setText('dash-m-' + kind, fmtPct(pct));
   const bar = el('dash-m-' + kind + '-bar');
   if (!bar) return;
+  const row = bar.closest('.host-metric');
+  if (row) row.classList.toggle('is-neutral', metricNeutral(kind));
   const num = Number(pct);
   const valid = pct !== null && pct !== undefined && !isNaN(num);
   const v = valid ? clamp(num, 0, 100) : 0;

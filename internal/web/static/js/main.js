@@ -44,12 +44,10 @@ function onVisibilityChange() {
   if (document.hidden) {
     dashboardStopPolling();
     updateStopPolling();
-    sparkStop();
   } else {
     /* 恢复可见立即刷一次再续轮询 */
     if (['dash', 'service'].includes(currentSection)) dashboardStartPolling();
     if (currentSection === 'service') updateStartPolling();
-    if (currentSection === 'dash') sparkStart();
   }
 }
 

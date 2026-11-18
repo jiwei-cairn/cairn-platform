@@ -15,10 +15,8 @@ import (
 func newRotator(opt Options) (io.Writer, func()) {
 	lj := &lumberjack.Logger{
 		Filename:   opt.File,
-		MaxSize:    orDefault(opt.MaxSizeMB, 20),  // MB
-		// 兜底 20 与 config.Validate 的上限（1–20）保持一致：
-		// 兜底若取 30，会造出一个校验不允许、运行时却生效的取值。
-		MaxBackups: orDefault(opt.MaxBackups, 20), // 份
+		MaxSize:    orDefault(opt.MaxSizeMB, 20), // MB（校验允许 1–512，兜底取常见默认）
+		MaxBackups: orDefault(opt.MaxBackups, 20), // 份（校验允许 1–20，兜底与上限一致）
 		MaxAge:     orDefault(opt.MaxAgeDays, 30), // 天
 		Compress:   opt.Compress,
 		LocalTime:  true,

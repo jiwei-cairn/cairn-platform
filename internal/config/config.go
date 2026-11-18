@@ -179,8 +179,7 @@ type OTA struct {
 
 // Web 平台 Web 服务。
 type Web struct {
-	Port              int `json:"port"`              // 监听端口（变更需重启平台）
-	SessionTimeoutMin int `json:"sessionTimeoutMin"` // 会话超时（V1 无登录，预留）
+	Port int `json:"port"` // 监听端口（变更需重启平台）
 }
 
 // LogQuota 平台日志配额（lumberjack 轮转）。
@@ -193,12 +192,9 @@ type LogQuota struct {
 	ServicesTotalMB    int    `json:"servicesTotalMB"` // 被管服务采集日志总配额（logs/services/ 整体，svclog 看门人兜底）
 }
 
-// Collect 采集统计与版本保留策略。
+// Collect 主机指标采集（决策 2026-11：只缓存实时值，不落库、不做降采样/版本保留）。
 type Collect struct {
-	IntervalSec  int    `json:"intervalSec"`  // 指标采集周期（2–3600s；改动需重启平台）
-	Downsample   string `json:"downsample"`   // none|two-level（M3 降采样落地前不生效）
-	KeepVersions int    `json:"keepVersions"` // 本地保留版本数（默认 2；M2 回滚落地前不生效）
-	DBQuotaMB    int    `json:"dbQuotaMB"`    // 指标库配额（M3 落地前不生效，仅持久化）
+	IntervalSec int `json:"intervalSec"` // 采集周期（5–3600s；改动需重启平台）
 }
 
 // Issue 是一条可定位到表单字段的配置问题。
@@ -212,9 +208,9 @@ type Issue struct {
 func Default() App {
 	return App{
 		OTA:      OTA{ServerURL: "", TimeoutSec: 30},
-		Web:      Web{Port: 1995, SessionTimeoutMin: 30},
+		Web:      Web{Port: 1995},
 		LogQuota: LogQuota{PlatformMaxMB: 20, PlatformMaxBackups: 5, RetentionDays: 30, BufferLines: 2000, Level: "info", ServicesTotalMB: 512},
-		Collect:  Collect{IntervalSec: 10, Downsample: "two-level", KeepVersions: 2, DBQuotaMB: 512},
+		Collect:  Collect{IntervalSec: 5},
 	}
 }
 
@@ -242,7 +238,6 @@ func Validate(app App) []Issue {
 	}
 	rangeIssue("ota.timeoutSec", app.OTA.TimeoutSec >= 5 && app.OTA.TimeoutSec <= 120, "OTA 超时需在 5–120 秒")
 	rangeIssue("web.port", app.Web.Port >= 1 && app.Web.Port <= 65535, "端口需在 1–65535 之间")
-	rangeIssue("web.sessionTimeoutMin", app.Web.SessionTimeoutMin >= 5 && app.Web.SessionTimeoutMin <= 1440, "会话超时需在 5–1440 分钟")
 	rangeIssue("logQuota.platformMaxMB", app.LogQuota.PlatformMaxMB >= 1 && app.LogQuota.PlatformMaxMB <= 512, "单文件上限需在 1–512 MB")
 	rangeIssue("logQuota.platformMaxBackups", app.LogQuota.PlatformMaxBackups >= 1 && app.LogQuota.PlatformMaxBackups <= 20, "保留份数需在 1–20")
 	rangeIssue("logQuota.retentionDays", app.LogQuota.RetentionDays >= 1 && app.LogQuota.RetentionDays <= 365, "保留天数需在 1–365 天")
@@ -253,14 +248,7 @@ func Validate(app App) []Issue {
 	default:
 		add("logQuota.level", "日志级别需为 debug/info/warn/error")
 	}
-	rangeIssue("collect.intervalSec", app.Collect.IntervalSec >= 2 && app.Collect.IntervalSec <= 3600, "采集周期需在 2–3600 秒")
-	rangeIssue("collect.keepVersions", app.Collect.KeepVersions >= 1 && app.Collect.KeepVersions <= 5, "版本保留数需在 1–5")
-	rangeIssue("collect.dbQuotaMB", app.Collect.DBQuotaMB >= 64 && app.Collect.DBQuotaMB <= 16384, "数据库配额需在 64–16384 MB")
-	switch app.Collect.Downsample {
-	case "none", "two-level":
-	default:
-		add("collect.downsample", "降采样策略需为 none/two-level")
-	}
+	rangeIssue("collect.intervalSec", app.Collect.IntervalSec >= 5 && app.Collect.IntervalSec <= 3600, "采集周期需在 5–3600 秒")
 	return issues
 }
 

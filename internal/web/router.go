@@ -51,7 +51,6 @@ func Router(s *api.Server) http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/version", s.GetVersion)
 		r.Get("/dashboard", s.GetDashboard)
-		r.Get("/dashboard/host-metrics", s.GetHostMetrics)
 		r.Get("/events", s.ListEvents)
 
 		// 服务定义 CRUD + 手动操作 + 统计曲线。

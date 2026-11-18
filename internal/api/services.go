@@ -185,6 +185,12 @@ func (s *Server) SaveService(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "服务名称必填")
 		return
 	}
+	// 名称同时充当安装目录名，收紧为安全路径片段（与前端 / manifest 安装同规则），
+	// 防止 DeleteService 拼路径时被 ".."/分隔符穿越（防御第一层）。
+	if !manifestNameRE.MatchString(p.Name) {
+		fail(w, http.StatusBadRequest, "服务名称仅限小写字母/数字/._-，且以字母或数字开头（最长 64）")
+		return
+	}
 	if p.ServiceType != "native" && p.ServiceType != "opensource" {
 		fail(w, http.StatusBadRequest, "serviceType 必须为 native 或 opensource")
 		return
@@ -272,6 +278,11 @@ func (s *Server) SaveService(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		def.CreatedAt = exist.CreatedAt
+		// 安装制字段（版本/清单快照/安装时间）不经手动编辑：更新时从旧行透传，
+		// 否则全字段 Save 会把这些列清零，导出 409、OTA 版本门控失真。
+		def.Version = exist.Version
+		def.Manifest = exist.Manifest
+		def.InstalledAt = exist.InstalledAt
 		fingerprintChanged := exist.ExePath != def.ExePath ||
 			exist.AutoStart != def.AutoStart || exist.Enabled != def.Enabled ||
 			string(exist.Args) != string(def.Args) || string(exist.Env) != string(def.Env)
@@ -351,8 +362,13 @@ func (s *Server) DeleteService(w http.ResponseWriter, r *http.Request) {
 func (s *Server) purgeServiceArtifacts(id int, name string) {
 	// 1) 版本目录（services/{os}/{arch}/{name}），不触碰 services 根。
 	if name != "" {
-		svcDir := filepath.Join(s.installRoot(), name)
-		if err := os.RemoveAll(svcDir); err != nil {
+		root := s.installRoot()
+		svcDir := filepath.Join(root, name)
+		// 双重防御（第二层）：SaveService 已用 manifestNameRE 校验 name，此处仍
+		// 断言不越界——历史脏数据 / 直接改库时，name 含 ".." 或绝对路径即拒绝删除。
+		if !pathWithin(root, svcDir) {
+			logx.Module("api").Warn("服务名越界，跳过版本目录清理", "svc", name, "dir", svcDir)
+		} else if err := os.RemoveAll(svcDir); err != nil {
 			logx.Module("api").Warn("删除版本目录失败", "svc", name, "dir", svcDir, "err", err)
 		}
 	}
@@ -362,7 +378,6 @@ func (s *Server) purgeServiceArtifacts(id int, name string) {
 		desc  string
 	}{
 		{&store.ServiceRuntime{}, "运行态"},
-		{&store.MetricPoint{}, "指标点"},
 	} {
 		if err := s.DB.Where("service_id = ?", id).Delete(q.model).Error; err != nil {
 			logx.Module("api").Warn("清理"+q.desc+"失败", "id", id, "err", err)
