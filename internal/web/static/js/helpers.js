@@ -162,9 +162,11 @@ function showToast(level, message, opts) {
   if (!box) return;
   while (box.children.length >= 4) box.removeChild(box.firstChild);     // 堆叠上限 4
   let actionHtml = '';
+  let actionIdx = -1; // 该 toast 占用的动作槽位（销毁时置空，防 _toastActions 只增不减）
   if (opts && opts.action && opts.action.label) {
-    const idx = _toastActions.length; _toastActions[idx] = opts.action.fn;
-    actionHtml = ' <button class="btn btn-sm btn-link p-0 ms-2 fw-semibold" style="font-size:12.5px;color:var(--primary)" onclick="_runToastAction(' + idx + ')">' + escapeHtml(opts.action.label) + '</button>';
+    actionIdx = _toastActions.length;
+    _toastActions[actionIdx] = opts.action.fn;
+    actionHtml = ' <button class="btn btn-sm btn-link p-0 ms-2 fw-semibold" style="font-size:12.5px;color:var(--primary)" onclick="_runToastAction(' + actionIdx + ')">' + escapeHtml(opts.action.label) + '</button>';
   }
   const t = document.createElement('div');
   t.className = 'toast ' + meta.cls;
@@ -179,6 +181,6 @@ function showToast(level, message, opts) {
   hideTimer = setTimeout(() => bsToast.hide(), remain);
   t.addEventListener('mouseenter', () => { clearTimeout(hideTimer); remain = Math.max(800, remain - (Date.now() - startAt)); }); // hover 暂停计时
   t.addEventListener('mouseleave', () => { startAt = Date.now(); hideTimer = setTimeout(() => bsToast.hide(), remain); });
-  t.addEventListener('hidden.bs.toast', () => { clearTimeout(hideTimer); t.remove(); });
+  t.addEventListener('hidden.bs.toast', () => { clearTimeout(hideTimer); t.remove(); if (actionIdx >= 0) _toastActions[actionIdx] = null; });
   bsToast.show();
 }

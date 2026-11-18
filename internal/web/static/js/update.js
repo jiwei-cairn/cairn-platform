@@ -5,7 +5,6 @@
    主理人裁决：apply 返回 taskId，统一任务轮询
    ══════════════════════════════════════════════ */
 
-let upUsbTimer = null;
 let upTaskTimer = null;
 
 function updateStartPolling() {
@@ -13,7 +12,10 @@ function updateStartPolling() {
   // USB/OTG 已裁撤（decisions.md A2）：无轮询任务。
   if (state.update.taskActive && state.update.taskId) startTaskPolling();
 }
-function updateStopPolling() { upUsbTimer = stopPolling(upUsbTimer); }
+function updateStopPolling() {
+  /* 无区块专属轮询需停：USB/OTG 已裁撤；升级任务轮询按「后台继续」语义
+     跨区块持续（decisions.md D10），由任务终态自行收尾。 */
+}
 function upgradeLocked() { return !!state.update.taskActive; }
 
 async function loadUpdateAll() {
@@ -28,14 +30,6 @@ function retryLoadUpdate() { loadUpdateAll(); }
 function renderRecordsLoading() {
   setHtml('up-records-state', loadingState('升级历史加载中…'));
   setHtml('up-records-tbody', '');
-}
-
-function upgradeTaskTouches(serviceId) {
-  const t = state.update.taskSnapshot;
-  if (!t) return false;
-  if (Number(t.serviceId) === Number(serviceId)) return true;
-  if (t.packages && t.packages.some(p => Number(p.serviceId) === Number(serviceId))) return true;
-  return false;
 }
 
 /* ── OTA 源状态卡 ── */
@@ -129,7 +123,6 @@ const TASK_PHASE_MAP = {
 };
 function adaptTask(t) {
   const m = TASK_PHASE_MAP[t.phase] || TASK_PHASE_MAP.queued;
-  const running = t.phase !== 'success' && t.phase !== 'failed';
   return {
     status: t.phase === 'success' ? 'success' : t.phase === 'failed' ? 'failed' : 'running',
     phase: m.key, phaseIndex: m.idx, mode: t.source === 'ota' ? 'ota' : 'manual',
@@ -187,9 +180,8 @@ function renderTaskBanner(t) {
   const b = el('up-task-banner');
   if (!state.update.taskActive) { b.classList.add('d-none'); renderServiceCards(); renderTftpBanner(); return; }
   t = t || state.update.taskSnapshot;
-  const phases = t && t.mode === 'rollback' ? ROLLBACK_PHASES : UPGRADE_PHASES;
-  const phaseLabel = t && t.phase ? ((phases.find(p => p.key === t.phase) || {}).label || t.phase) : '准备中';
-  const name = t && t.mode === 'usb' ? 'U盘批量升级' : (t && t.serviceName) || '服务';
+  const phaseLabel = t && t.phase ? ((UPGRADE_PHASES.find(p => p.key === t.phase) || {}).label || t.phase) : '准备中';
+  const name = (t && t.serviceName) || '服务';
   b.innerHTML = '<i class="bi bi-arrow-repeat me-2"></i><b>升级进行中：' + escapeHtml(name) + '</b> · 当前阶段：' + phaseLabel +
     ' <span class="text-muted">（点击查看进度）</span>';
   b.classList.remove('d-none');
@@ -208,59 +200,19 @@ function closeUpgradeModal() { umModal.hide(); }
 
 function renderUpgradeModal(t) {
   if (!t) return;
-  setText('um-svc', t.mode === 'usb' ? 'U盘批量升级' : (t.serviceName || '服务'));
-  const isRollback = t.mode === 'rollback';
-  const phases = isRollback ? ROLLBACK_PHASES : UPGRADE_PHASES;
-  if (t.batch) {
-    el('um-batch').classList.remove('d-none');
-    setText('um-batch-text', '第 ' + t.batch.index + '/' + t.batch.total + ' 个包：' + t.batch.packageName);
-  } else el('um-batch').classList.add('d-none');
+  setText('um-svc', t.serviceName || '服务');
 
-  const failedIdx = (t.status === 'failed' || t.status === 'rolledback') ? t.phaseIndex : -1;
-  el('um-phases').innerHTML = phases.map((p, i) => {
-    let cls = '', dot = '', meta = '';
-    const isAutoRollbackTail = t.status === 'rolledback' && p.key === 'commit';
+  el('um-phases').innerHTML = UPGRADE_PHASES.map((p, i) => {
+    let cls = '', dot = '';
     if (i < t.phaseIndex) { cls = 'done'; dot = '<i class="bi bi-check-lg"></i>'; }
     else if (i === t.phaseIndex) {
       if (t.status === 'running') { cls = 'active'; dot = '<span class="spinner-border spinner-border-sm" style="width:11px;height:11px;border-width:2px"></span>'; }
-      else if (t.status === 'failed' || t.status === 'rolledback') { cls = 'failed'; dot = '<i class="bi bi-x-lg"></i>'; }
+      else if (t.status === 'failed') { cls = 'failed'; dot = '<i class="bi bi-x-lg"></i>'; }
       else { cls = 'done'; dot = '<i class="bi bi-check-lg"></i>'; }
-    } else if (isAutoRollbackTail && i === t.phaseIndex + 1) {
-      cls = 'rolledback'; dot = '<i class="bi bi-arrow-counterclockwise"></i>';
     }
     if (t.status === 'success') { cls = 'done'; dot = '<i class="bi bi-check-lg"></i>'; }
-    if (t.status === 'running') {
-      if (p.key === 'health' && t.healthTotal) meta = '观察中 ' + Math.round(t.healthElapsed || 0) + 's/' + Math.round(t.healthTotal) + 's，失败将自动回滚';
-      if (p.key === 'download') meta = t.progress != null ? Math.round(t.progress) + '%' : '已接收 ' + fmtBytes(t.receivedBytes || 0);
-    }
-    const label = isAutoRollbackTail ? '自动回滚' : p.label;
-    return '<li class="phase-item ' + cls + '"><span class="phase-dot">' + dot + '</span><span>' + label + '</span>' +
-      (meta ? '<span class="phase-meta">' + meta + '</span>' : '') + '</li>';
+    return '<li class="phase-item ' + cls + '"><span class="phase-dot">' + dot + '</span><span>' + p.label + '</span></li>';
   }).join('');
-
-  /* 进度条：下载（可量）/ 健康观察（倒计时） */
-  const wrap = el('um-progress-wrap');
-  const bar = el('um-progress-bar');
-  const ptxt = el('um-progress-text');
-  if (t.status === 'running' && (t.phase === 'download' || t.phase === 'health')) {
-    wrap.classList.remove('d-none');
-    if (t.phase === 'download') {
-      if (t.totalBytes) {
-        bar.style.width = (t.progress || 0) + '%';
-        bar.classList.remove('progress-bar-animated');
-        ptxt.textContent = fmtBytes(t.receivedBytes || 0) + ' / ' + fmtBytes(t.totalBytes);
-      } else {
-        bar.style.width = '100%';
-        bar.classList.add('progress-bar-animated'); /* 无 size：不定条纹进度 */
-        ptxt.textContent = '已接收 ' + fmtBytes(t.receivedBytes || 0);
-      }
-    } else {
-      const pct = t.healthTotal ? Math.min(100, Math.round((t.healthElapsed || 0) / t.healthTotal * 100)) : 0;
-      bar.style.width = pct + '%';
-      bar.classList.remove('progress-bar-animated');
-      ptxt.textContent = '健康验证期 ' + Math.round(t.healthElapsed || 0) + 's / ' + Math.round(t.healthTotal || 0) + 's';
-    }
-  } else wrap.classList.add('d-none');
 
   /* 结果区 */
   const result = el('um-result');
@@ -271,22 +223,9 @@ function renderUpgradeModal(t) {
     if (t.status === 'success') {
       html = '<div class="um-result-banner ok"><i class="bi bi-check-circle-fill me-2"></i>升级成功' +
         (t.targetVersion ? '，当前版本 <b>' + escapeHtml(t.targetVersion) + '</b>' : '') + '</div>';
-    } else if (t.status === 'rolledback') {
-      html = '<div class="um-result-banner warn"><i class="bi bi-arrow-counterclockwise me-2"></i>已自动回滚至 <b>' + escapeHtml(t.rolledBackTo || t.targetVersion || '旧版本') + '</b>（健康观察失败）</div>';
     } else if (t.status === 'failed') {
       html = '<div class="um-result-banner err"><i class="bi bi-x-octagon-fill me-2"></i>升级失败：' + escapeHtml(t.detail || '未知原因') + '</div>';
     }
-    if (t.packages && t.packages.length) {
-      const RS = { success: ['badge-ok', '成功'], rolledback: ['badge-r', '已回滚'], failed: ['badge-err', '失败'], pending: ['badge-muted', '未执行'] };
-      html += '<div class="table-responsive mt-2"><table class="table table-sm table-hover align-middle"><thead><tr><th>包</th><th>结果</th><th>说明</th></tr></thead><tbody>' +
-        t.packages.map(p => {
-          const svc = svcById(p.serviceId);
-          const meta = RS[p.result] || RS.pending;
-          return '<tr><td>' + escapeHtml(p.packageName) + '<div class="text-muted small">' + escapeHtml(svc ? svcTitle(svc) : '#' + p.serviceId) + ' → ' + escapeHtml(p.version) + '</div></td>' +
-            '<td><span class="badge ' + meta[0] + '">' + meta[1] + '</span></td><td class="text-muted small">' + escapeHtml(p.detail || '—') + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
-    }
-    if (t.status !== 'running' && t.reportNote) html += '<div class="text-muted small mt-1"><i class="bi bi-usb-symbol me-1"></i>' + escapeHtml(t.reportNote) + '</div>';
     result.innerHTML = html;
   }
 }

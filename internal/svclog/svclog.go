@@ -284,13 +284,6 @@ func Attach(id int, name string, p Policy) *Sink {
 	return s
 }
 
-// Get 只读查询（无出口时 nil）。
-func Get(id int) *Sink {
-	mgrMu.Lock()
-	defer mgrMu.Unlock()
-	return sinks[id]
-}
-
 // Detach 关闭并移除一个服务日志出口（服务删除时调用，回收落盘协程与文件句柄）。
 // 平台侧文件按 E2 留存不删，仅停采并释放运行时资源；若稍后同 id 再次 Attach
 // 会新建出口并从文件尾部回填历史。

@@ -87,7 +87,6 @@ function collectSettings() {
   SET_BOOL.forEach(([path, id]) => setPath(out, path, checked(id)));
   return out;
 }
-const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 function validateSettings(s) {
   const issues = [];
   const add = (field, message) => issues.push({ field, message });

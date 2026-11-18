@@ -35,6 +35,16 @@ func Open(path string) (*gorm.DB, error) {
 	); err != nil {
 		return nil, err
 	}
+	// 旧库清理：2026-11 决策「主机指标仅内存缓存、不落库」后 MetricPoint 模型
+	// 已移除，旧库文件里仍残留 metric_points 表与历史数据（占盘且永不再读）。
+	// DROP TABLE IF EXISTS 幂等，每次启动执行一次即可。
+	if db.Migrator().HasTable("metric_points") {
+		if err := db.Migrator().DropTable("metric_points"); err != nil {
+			logx.Module("store").Warn("清理旧指标表失败", "err", err)
+		} else {
+			logx.Module("store").Info("已清理旧指标表 metric_points（指标改为内存缓存）")
+		}
+	}
 	return db, nil
 }
 

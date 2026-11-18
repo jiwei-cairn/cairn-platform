@@ -41,20 +41,9 @@ const UPGRADE_PHASES = [
   { key: 'health',   label: '健康观察' },
   { key: 'commit',   label: '提交' },
 ];
-/* 回滚阶段（交互说明 3.5：无下载/验签，直接从停服起） */
-const ROLLBACK_PHASES = [
-  { key: 'stop',   label: '停服' },
-  { key: 'switch', label: '切换旧版' },
-  { key: 'health', label: '健康观察' },
-  { key: 'commit', label: '完成' },
-];
-
-const UPGRADE_SOURCE = { tftp: 'TFTP', usb: 'U盘', manual: '手动', local: '本地', market: '市场安装' };
-const RECORD_STATUS = {
-  success:    ['badge-ok',  '成功'],
-  failed:     ['badge-err', '失败'],
-  rolledback: ['badge-r',   '已回滚'],
-};
+/* 回滚阶段已随「覆盖式升级无多版本目录」裁撤（decisions.md B6/D1：
+   回退 = 重新上传旧版包）；原 ROLLBACK_PHASES / UPGRADE_SOURCE / RECORD_STATUS
+   均已移除——升级历史改为消费后端 EventLog 口径（level + message）。 */
 
 /* 日志环形缓冲上限默认值（交互说明 3.7 步骤 3）。
    实际取值以设置为准（logQuota.bufferLines），由 logBufferMax() 解析。 */
@@ -74,7 +63,9 @@ const MARKET_TABS = [
   { key: 'tools',    label: '工具',     icon: 'bi-tools' },
 ];
 
-/* 升级来源（管理页：OTA 远程 / OTG U盘 / LOCAL 本地） */
+/* 说明：UPGRADE_SOURCE 与 RECORD_STATUS 已移除——升级历史消费后端
+   EventLog 口径（level + message），不再有 fromVersion/toVersion/status。 */
+
 /* 全局 state —— 前端唯一数据源（交互说明 §1.2） */
 const state = {
   version: null,            // 平台自身版本（只读）
@@ -99,7 +90,6 @@ const state = {
     available: {},          // serviceId → check 返回条目
     checkedAt: 0,
     records: [], recordsError: null,
-    usb: null, usbError: null,
     taskId: null, taskActive: false,
     checking: false,
   },

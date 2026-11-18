@@ -34,7 +34,6 @@
   --badge-muted-bg: #f3f4f6; --badge-muted-fg: #4b5563;
   --badge-err-bg: #fee2e2;   --badge-err-fg: #991b1b;
   --badge-plain-bg: #e0e7ff; --badge-plain-fg: #4338ca;
-  --badge-rw-bg: #dbeafe;     --badge-rw-fg: #1e40af;
   --tag-bg: #f3f4f6;         --tag-fg: #4b5563;
   --stat-bg: #f8fafc;
   --neutral-metric: #94a3b8;  /* 中性指标色：磁盘等长期偏高、不参与阈值着色的指标 */
@@ -65,13 +64,10 @@ body { margin: 0; background: var(--bg); min-height: 100vh; font-family: -apple-
 .sidebar-brand .brand-text { font-weight: 700; font-size: 15px; line-height: 1.2; color: var(--text-strong); }
 .sidebar-brand .brand-sub { font-size: 11px; color: var(--muted-color); }
 .sidebar-nav { padding: 14px 12px; display: flex; flex-direction: column; gap: 4px; }
-.sidebar-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-faint); padding: 8px 14px 4px; }
 .sidebar-item { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 10px; color: var(--sidebar-item); cursor: pointer; font-size: 14px; font-weight: 500; transition: all .15s; border: none; background: none; text-align: left; width: 100%; }
 .sidebar-item:hover { background: var(--primary-light); color: var(--primary); }
 .sidebar-item.active { background: var(--primary); color: var(--panel-bg); box-shadow: var(--sidebar-active-shadow); }
 .sidebar-item i { font-size: 18px; }
-.sidebar-item .item-badge { margin-left: auto; font-size: 10px; padding: 2px 7px; border-radius: 20px; background: var(--tag-bg); color: var(--text-faint); font-weight: 600; }
-.sidebar-item.active .item-badge { background: var(--hit-bg); color: var(--panel-bg); }
 .sidebar-footer { margin-top: auto; padding: 14px 18px; font-size: 11px; color: var(--text-faint); border-top: 1px solid var(--border-color); }
 
 /* ── Main ── */
@@ -86,7 +82,6 @@ body { margin: 0; background: var(--bg); min-height: 100vh; font-family: -apple-
 /* 设置卡片瀑布流：CSS 多列按卡片自然高度纵向堆叠（与市场页同模式），
    列宽 340px 起按可用宽度自动分列（1–3 列）。 */
 .settings-grid { columns: 340px; column-gap: 18px; }
-.settings-column { min-width: 0; }
 .settings-card { width: 100%; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 14px; box-shadow: var(--card-shadow); padding: 20px; break-inside: avoid; margin: 0 0 18px; }
 .settings-card-head { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color); }
 .settings-card-head i { color: var(--primary); font-size: 19px; }
@@ -120,8 +115,6 @@ body { margin: 0; background: var(--bg); min-height: 100vh; font-family: -apple-
 .settings-field:last-child { margin-bottom: 0; }
 .settings-field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); margin-bottom: 5px; }
 .settings-field .form-text { margin-top: 4px; font-size: 11.5px; }
-.settings-switch { display: flex; justify-content: space-between; align-items: center; min-height: 38px; padding: 7px 10px; border: 1px solid var(--border-color); border-radius: 6px; }
-.settings-switch span { font-size: 13px; color: var(--text-secondary); }
 .settings-static { margin: 0; }
 .settings-static > div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--border-color); }
 .settings-static > div:first-child { padding-top: 0; }
@@ -165,7 +158,6 @@ mark.log-hit { background: var(--hit-bg); color: inherit; padding: 0 1px; border
 /* ── 配置文件编辑器（深色面板同 log-console 令牌） ── */
 .code-editor { width: 100%; display: block; background: var(--code-bg); color: var(--code-fg); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px 16px; font-family: 'Consolas','Monaco','Courier New',monospace; font-size: 12.5px; line-height: 1.7; min-height: 320px; resize: vertical; white-space: pre; tab-size: 2; }
 .code-editor:focus { outline: none; border-color: var(--primary-border); box-shadow: 0 0 0 3px var(--primary-glow); }
-.code-editor[readonly] { opacity: .75; }
 
 /* ── SSE 连接横幅 ── */
 .log-conn-banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-radius: 10px; border-left: 3px solid var(--muted-color); background: var(--tag-bg); color: var(--text-secondary); font-size: 13px; padding: 9px 14px; }
@@ -267,14 +259,9 @@ mark.log-hit { background: var(--hit-bg); color: inherit; padding: 0 1px; border
 .phase-item.active .phase-dot { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
 .phase-item.failed { color: var(--danger); font-weight: 600; }
 .phase-item.failed .phase-dot { border-color: var(--danger); background: var(--danger); color: var(--panel-bg); }
-.phase-item.rolledback { color: var(--warning); font-weight: 600; }
-.phase-item.rolledback .phase-dot { border-color: var(--warning); background: var(--warning); color: var(--panel-bg); }
-.phase-meta { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted-color); white-space: nowrap; }
-.um-batch-title { font-weight: 700; font-size: 13.5px; color: var(--text-strong); margin-bottom: 8px; }
 .um-result-banner { border-radius: 10px; padding: 11px 14px; font-size: 13.5px; border: 1px solid var(--border-color); }
 .um-result-banner.ok { background: var(--badge-ok-bg); border-color: var(--success); color: var(--badge-ok-fg); }
 .um-result-banner.err { background: var(--badge-err-bg); border-color: var(--danger); color: var(--badge-err-fg); }
-.um-result-banner.warn { background: var(--stale-bg); border-color: var(--warning); color: var(--stale-fg); }
 
 /* ── 数据过期横幅 ── */
 .stale-banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--stale-bg); color: var(--stale-fg); border-radius: 10px; padding: 9px 14px; font-size: 13px; }
@@ -297,10 +284,9 @@ mark.log-hit { background: var(--hit-bg); color: inherit; padding: 0 1px; border
 /* ── 响应式（≤880px 折叠策略） ── */
 @media (max-width: 880px) {
   .sidebar { width: 64px; }
-  .sidebar-brand .brand-text, .sidebar-brand .brand-sub, .sidebar-item span, .sidebar-item .item-badge, .sidebar-section-title, .sidebar-footer { display: none; }
+  .sidebar-brand .brand-text, .sidebar-brand .brand-sub, .sidebar-item span, .sidebar-footer { display: none; }
   .sidebar-item { justify-content: center; padding: 12px; }
   .app-main { padding: 18px 14px 36px; }
-  .settings-grid { grid-template-columns: 1fr; }
   .filter-bar .fb-item { min-width: 130px; }
   .model-card { padding: 14px; }
   .summary-card { padding: 14px 16px; }
