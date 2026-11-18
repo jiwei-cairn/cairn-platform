@@ -12,6 +12,7 @@ import (
 
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
 	"github.com/jiwei-cairn/cairn-platform/internal/store"
+	"github.com/jiwei-cairn/cairn-platform/internal/svclog"
 
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
@@ -383,6 +384,9 @@ func (s *Server) purgeServiceArtifacts(id int, name string) {
 			logx.Module("api").Warn("清理"+q.desc+"失败", "id", id, "err", err)
 		}
 	}
+	// 3) 日志出口：回收落盘协程与文件句柄（平台侧文件按 E2 留存，仅停采释放资源；
+	//    此前出口随服务删除永久泄漏，直到平台退出）。
+	svclog.Detach(id)
 }
 
 // serviceOp 是 start/stop/restart 三个手动操作的共用实现。

@@ -106,11 +106,11 @@ func (s *Sink) Write(p []byte) (int, error) {
 		i := bytes.IndexByte(rest, '\n')
 		if i < 0 {
 			s.pending = append(s.pending, rest...)
-			// 无换行的巨块（base64/二进制垃圾）：攒到单行上限即强制吐出，
-			// 防止残段无限驻留内存。
-			if len(s.pending) >= MaxLineBytes {
+			// 无换行的巨块（base64/二进制垃圾）：每攒满单行上限即吐出一段，
+			// 循环直到余量低于上限——既防驻留内存也不丢字节（保留残段继续累积）。
+			for len(s.pending) >= MaxLineBytes {
 				line := string(s.pending[:MaxLineBytes]) + "…（单行已截断）"
-				s.pending = s.pending[:0]
+				s.pending = s.pending[MaxLineBytes:]
 				if l := s.ingest(line, now); l != "" {
 					batch = append(batch, l)
 				}
@@ -289,6 +289,19 @@ func Get(id int) *Sink {
 	mgrMu.Lock()
 	defer mgrMu.Unlock()
 	return sinks[id]
+}
+
+// Detach 关闭并移除一个服务日志出口（服务删除时调用，回收落盘协程与文件句柄）。
+// 平台侧文件按 E2 留存不删，仅停采并释放运行时资源；若稍后同 id 再次 Attach
+// 会新建出口并从文件尾部回填历史。
+func Detach(id int) {
+	mgrMu.Lock()
+	s := sinks[id]
+	delete(sinks, id)
+	mgrMu.Unlock()
+	if s != nil {
+		s.close()
+	}
 }
 
 // All 全部出口（按 id 升序，合并流输出顺序稳定）。

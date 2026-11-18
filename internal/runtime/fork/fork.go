@@ -232,6 +232,7 @@ func (r *Runtime) onExit(u *unit, name string, err error) {
 	job := u.job
 	u.job = 0 // job 内已无进程，句柄由 closeJob 释放
 	pid, code := u.pid, u.exitCode
+	svcID := u.def.ServiceID // 锁内读取：EnsureUnit 持锁写 def，锁外读属数据竞争
 	tail := u.tail.String()
 	first := !u.exitCh
 	u.exitCh = true
@@ -245,7 +246,7 @@ func (r *Runtime) onExit(u *unit, name string, err error) {
 		return
 	}
 	ev := runtime.UnitExit{
-		ServiceID: u.def.ServiceID, Name: name, ExitCode: code,
+		ServiceID: svcID, Name: name, ExitCode: code,
 		Err: err, Tail: tail, At: time.Now(),
 	}
 	select {
