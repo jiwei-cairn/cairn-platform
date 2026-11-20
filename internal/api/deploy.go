@@ -1,10 +1,11 @@
 // deploy.go — 部署流水线：安装与升级共用（decisions.md C3/D5/D11）。
 //
 // 覆盖式换文件的三段保护：
-//   .staging  解包过渡目录（断电 → 启动时清理）
-//   .old      被替换的旧产物（Windows 无法覆盖运行中 exe，只能换名；
-//             升级成功即删，启动兜底清理残留）
-//   .bak      被新版配置覆盖的用户配置（仅一份，下次升级时被覆盖）
+//
+//	.staging  解包过渡目录（断电 → 启动时清理）
+//	.old      被替换的旧产物（Windows 无法覆盖运行中 exe，只能换名；
+//	          升级成功即删，启动兜底清理残留）
+//	.bak      被新版配置覆盖的用户配置（仅一份，下次升级时被覆盖）
 //
 // data 角色文件若目标已存在则保留不覆盖（E2：旧数据留存不丢弃）。
 package api
@@ -225,9 +226,9 @@ func (s *Server) runDeployPipeline(ctx context.Context, t *upgradeTask, pkgPath,
 
 // swappedFile 记录一次换名动作（失败时反向执行）。
 type swappedFile struct {
-	DstPath  string // 正式位置（新文件现在的位置）
-	OldPath  string // 旧文件被换到的位置（.old/.bak）
-	HadOld   bool   // 正式位置原本有文件
+	DstPath string // 正式位置（新文件现在的位置）
+	OldPath string // 旧文件被换到的位置（.old/.bak）
+	HadOld  bool   // 正式位置原本有文件
 }
 
 // materialize 把 staging 内容换入正式位置。
@@ -301,7 +302,7 @@ func (s *Server) materialize(svcDir, staging string, m *pack.Manifest) ([]swappe
 }
 
 // pruneStaleDependencies 删除服务目录中不在新清单内的旧产物文件
-//（仅清 bin/ dependencies/ config/ 前缀；data 目录不在 svcDir，天然不受影响）。
+// （仅清 bin/ dependencies/ config/ 前缀；data 目录不在 svcDir，天然不受影响）。
 func (s *Server) pruneStaleDependencies(svcDir string, m *pack.Manifest) {
 	keep := make(map[string]bool, len(m.Files))
 	for _, f := range m.Files {
@@ -432,7 +433,7 @@ func applyManifestPolicies(def *store.Service, m *pack.Manifest) {
 		for _, f := range m.Files {
 			if f.Role == pack.RoleConfig {
 				def.ConfigFile = mustJSON(map[string]any{
-					"path": filepath.Join(m.Name, filepath.Base(f.Path)),
+					"path":        filepath.Join(m.Name, filepath.Base(f.Path)),
 					"validateCmd": "", "applyMode": "restart", "applyCmd": "", "maxHistory": 10,
 				})
 				break

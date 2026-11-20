@@ -37,15 +37,15 @@ import (
 
 // 升级任务的阶段（phase）。
 const (
-	PhaseQueued     = "queued"
-	PhaseVerifying  = "verifying"  // 包校验
+	PhaseQueued      = "queued"
+	PhaseVerifying   = "verifying"   // 包校验
 	PhaseDownloading = "downloading" // OTA 下载
-	PhasePrecheck   = "precheck"   // 预检
-	PhaseStopping   = "stopping"   // 停服等待退出
-	PhaseSwapping   = "swapping"   // 换文件
-	PhaseStarting   = "starting"   // 发起启动
-	PhaseSuccess    = "success"
-	PhaseFailed     = "failed"
+	PhasePrecheck    = "precheck"    // 预检
+	PhaseStopping    = "stopping"    // 停服等待退出
+	PhaseSwapping    = "swapping"    // 换文件
+	PhaseStarting    = "starting"    // 发起启动
+	PhaseSuccess     = "success"
+	PhaseFailed      = "failed"
 )
 
 // taskTimeout 单任务超时（卡死防护，decisions.md §10）。
@@ -277,8 +277,8 @@ func (s *Server) UpgradeCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := struct {
-		Enabled  bool            `json:"enabled"`  // OTA 是否已配置服务器
-		Offline  bool            `json:"offline"`  // 已配置但拉取失败
+		Enabled  bool              `json:"enabled"` // OTA 是否已配置服务器
+		Offline  bool              `json:"offline"` // 已配置但拉取失败
 		Services []checkResultItem `json:"services"`
 	}{Enabled: strings.TrimSpace(cfg.OTA.ServerURL) != "", Services: []checkResultItem{}}
 
@@ -478,7 +478,7 @@ func (e *downloadError) Unwrap() error { return e.err }
 //     则断点作废整包重收；416 视为「断点已收满」先做最终校验再决定去留；
 //   - 失败重试：网络错误 / 5xx 保留断点重试；哈希/大小不符丢弃 .part 从零重试；
 //     4xx 与任务取消立即失败。重试间做线性退避，每次尝试独立受 OTA 超时约束
-//    （client.Timeout 按次生效，长包不会因累计超时误判）。
+//     （client.Timeout 按次生效，长包不会因累计超时误判）。
 //   - 最终校验对 .part 全文件计算 sha256，续传拼接的内容同样被完整覆盖。
 //
 // .part 生命周期：任务内跨尝试复用；跨任务同名包（四元组文件名唯一）续用残点；

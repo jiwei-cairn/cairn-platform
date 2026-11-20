@@ -32,7 +32,7 @@ type uploadedFile struct {
 // maxUploadBytes 单次上传请求的硬上限（不只是内存阈值）。
 // ParseMultipartForm 的参数只是"多少留在内存、超出落盘临时目录"的阈值，
 // 配合 http.MaxBytesReader 才能真正拦住任意大请求写满 SD 卡
-//（data 与 SQLite 同卷，写满会直接拖垮平台）。
+// （data 与 SQLite 同卷，写满会直接拖垮平台）。
 const maxUploadBytes = 256 << 20
 
 // UploadFiles POST /api/services/upload：multipart 多文件暂存。
@@ -128,7 +128,7 @@ func copyReaderToFile(src io.Reader, dst string, size int64) error {
 
 // sniffArch 解析可执行文件头，返回其目标平台/架构（ELF→linux；
 // PE→windows；脚本/数据文件返回空串不校验）。ELF 用手工文件头解析
-//（最小 20 字节即可判定 e_machine，debug/elf 要求完整 ELF 加载段）。
+// （最小 20 字节即可判定 e_machine，debug/elf 要求完整 ELF 加载段）。
 func sniffArch(path string) (osName, arch string) {
 	// 只读文件头 64 字节：原实现 os.ReadFile 全量载入，仅为了看前 20 字节，
 	// 同批多个大包预检时内存峰值等于文件总大小（512MB 级设备有 OOM 风险）。

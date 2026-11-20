@@ -2,7 +2,8 @@
    ④ market 市场：顶部 tab（我的/发现/已安装/已禁用/产品）
       + 标签筛选 + CSS 瀑布流卡片
       卡片：名称 / 作者 / 版本 / 发布时间 / 描述 / 依赖标签
-   数据：目录与产品套件来自 /api/market/*（后端待实现）。
+   数据：目录与产品套件来自 /api/market/*（hub services/products 清单的展示视图，
+       平台侧拉取 hub 静态清单；安装状态由本地服务列表 join）。
       已安装/已禁用由 state.services 运行时推导 join。
    ══════════════════════════════════════════════ */
 
@@ -139,7 +140,7 @@ function renderMarketGrid() {
 
   if (state.market.catalogError && !state.market.catalog) {
     grid.innerHTML = '';
-    st.innerHTML = errorState('市场目录加载失败：' + state.market.catalogError + ('（后端暂未提供 /api/market 接口）'), 'marketRetry()');
+    st.innerHTML = errorState('市场目录加载失败：' + state.market.catalogError, 'marketRetry()');
     return;
   }
   if (state.market.loading && !state.market.catalog) {

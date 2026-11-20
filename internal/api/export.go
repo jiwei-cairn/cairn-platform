@@ -21,8 +21,8 @@ import (
 	"github.com/jiwei-cairn/cairn-platform/internal/store"
 
 	"github.com/go-chi/chi/v5"
-	goruntime "runtime"
 	"gorm.io/gorm"
+	goruntime "runtime"
 )
 
 // ExportService GET /api/services/{id}/export：导出当前服务为 .cairnpkg。
@@ -74,9 +74,9 @@ func (s *Server) ExportService(w http.ResponseWriter, r *http.Request) {
 	outPath := filepath.Join(os.TempDir(), "cairn-export-"+name)
 	if _, err := pack.Build(pack.BuildOptions{
 		Name: m.Name, Version: def.Version, Os: m.Os, Arch: m.Arch,
-		Entrypoint: m.Entrypoint,
+		Entrypoint:  m.Entrypoint,
 		DisplayName: m.DisplayName, Author: m.Author, Description: m.Description,
-		Tags: m.Tags, WebUrl: m.WebUrl, ReleaseNotes: m.ReleaseNotes,
+		Tags: m.Tags, ServiceType: def.ServiceType, WebUrl: m.WebUrl, ReleaseNotes: m.ReleaseNotes,
 		Args: m.Args, Env: m.Env, Deps: m.Deps, Ports: m.Ports, MinDiskMB: m.MinDiskMB,
 		RestartPolicy: m.RestartPolicy, HealthCheck: m.HealthCheck,
 		LogPolicy: m.LogPolicy, ConfigFile: m.ConfigFile,

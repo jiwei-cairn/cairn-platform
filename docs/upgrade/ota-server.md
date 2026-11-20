@@ -168,6 +168,7 @@ OTA 升级采用 **HTTP(S) 静态文件托管 + Pull 模式**。服务器只需�
 | `minPlatformVersion` | string | 否 | 平台版本下限 |
 | `releasedAt` | string | 否 | RFC3339 |
 | `notes` | string | 否 | 发布说明 |
+| `displayName` 等 | — | 否 | 市场展示元数据（`displayName/author/description/tags/deps/serviceType`，自包 manifest 透传；设备端 OTA 拉取忽略未知字段） |
 
 ### 关键设计
 
@@ -199,6 +200,7 @@ OTA 升级采用 **HTTP(S) 静态文件托管 + Pull 模式**。服务器只需�
       "sha256": "…整包哈希…",
       "sizeBytes": 1234,
       "displayName": "…", "author": "…", "description": "…", "tags": ["…"],
+      "services": [ {"name": "data-collector", "version": "1.3.0"} ],  // 服务版本引用（市场渲染 + M3 安装解析）
       "releasedAt": "…", "notes": "…"
     }
   ],

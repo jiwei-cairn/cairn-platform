@@ -16,6 +16,7 @@
 //	services/{os}/{arch}/{name}/current.txt                     ← Windows 人读指针
 //
 // 启动参数可用相对路径引用（workDir 默认 = 版本目录）：
+//
 //	-c config/app.conf          ← 配置文件
 //	-L dependencies/libxxx.so   ← 动态库
 //
@@ -62,15 +63,15 @@ func (s *Server) installRoot() string {
 // ServiceManifest 是安装包的说明文档（service manifest）。
 // 字段与市场目录条目同构：一份 schema 两处消费（打包随包分发 / 市场镜像）。
 type ServiceManifest struct {
-	Name          string            `json:"name"`          // 唯一标识（目录名）
-	DisplayName   string            `json:"displayName"`   // 展示名
-	Version       string            `json:"version"`       // 安装版本
-	ServiceType   string            `json:"serviceType"`   // native | opensource
+	Name          string            `json:"name"`        // 唯一标识（目录名）
+	DisplayName   string            `json:"displayName"` // 展示名
+	Version       string            `json:"version"`     // 安装版本
+	ServiceType   string            `json:"serviceType"` // native | opensource
 	Author        string            `json:"author"`
 	Description   string            `json:"description"`
 	Tags          []string          `json:"tags"`
-	Deps          []string          `json:"deps"`    // 依赖服务名（安装时解析为 id）
-	Binary        string            `json:"binary"`  // 包内相对路径，缺省 bin/{name}
+	Deps          []string          `json:"deps"`   // 依赖服务名（安装时解析为 id）
+	Binary        string            `json:"binary"` // 包内相对路径，缺省 bin/{name}
 	Args          []string          `json:"args"`
 	Env           map[string]string `json:"env"`
 	WorkDir       string            `json:"workDir"`
@@ -81,10 +82,10 @@ type ServiceManifest struct {
 	WebUrl        string            `json:"webUrl"`
 	Ports         []int             `json:"ports"` // 冲突预检
 	MinDiskMB     int               `json:"minDiskMB"`
-	Os            string            `json:"os"`   // 目标平台 linux|windows（空=不限；预检与本机比对）
-	Arch          string            `json:"arch"` // 目标架构 amd64|arm|arm64（空=不限；GOARCH 命名）
+	Os            string            `json:"os"`                    // 目标平台 linux|windows（空=不限；预检与本机比对）
+	Arch          string            `json:"arch"`                  // 目标架构 amd64|arm|arm64（空=不限；GOARCH 命名）
 	ExternalRef   bool              `json:"externalRef,omitempty"` // 外部引用模式：产物不复制入仓，exePath 指向外部路径（调试用）
-	ExtraFiles    []string          `json:"extraFiles,omitempty"` // 依赖文件清单（dll/so 等，与主程序同目录落盘）
+	ExtraFiles    []string          `json:"extraFiles,omitempty"`  // 依赖文件清单（dll/so 等，与主程序同目录落盘）
 }
 
 // installOverrides 用户在 manifest 默认之上可覆盖的运行参数（安装表单）。
@@ -109,9 +110,9 @@ type installOverrides struct {
 
 // installRequest POST /api/services/install 请求体。
 type installRequest struct {
-	Manifest   ServiceManifest  `json:"manifest"`
-	Overrides  installOverrides `json:"overrides"`
-	PrecheckOnly bool           `json:"precheckOnly"`
+	Manifest     ServiceManifest  `json:"manifest"`
+	Overrides    installOverrides `json:"overrides"`
+	PrecheckOnly bool             `json:"precheckOnly"`
 	// Source 来源信封：market（市场/包安装）| manual（平台表单创建）。
 	// 台账与导出说明卡时呈现来源。
 	Source string `json:"source"`
@@ -459,7 +460,7 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 		ExePath: binPath, WorkDir: m.WorkDir,
 		Args: mustJSON(nonNil(args)), Env: mustJSON(env), DependsOn: mustJSON(dependsOn),
 		Enabled: enabled, AutoStart: req.Overrides.AutoStart,
-		Priority: req.Overrides.Priority,
+		Priority:    req.Overrides.Priority,
 		InstalledAt: time.Now(),
 	}
 	def.RestartPolicy, def.HealthCheck, def.ConfigFile, def.LogPolicy = defaultPolicyBlobs()
@@ -579,7 +580,7 @@ func synthesizeManifest(def store.Service) ServiceManifest {
 	m := ServiceManifest{
 		Name: def.Name, DisplayName: firstNonEmpty(def.Summary, def.Name), ServiceType: def.ServiceType,
 		Version: "current", Args: args, Env: env, WorkDir: def.WorkDir,
-		WebUrl: def.WebUrl,
+		WebUrl:        def.WebUrl,
 		RestartPolicy: json.RawMessage(def.RestartPolicy),
 		HealthCheck:   json.RawMessage(def.HealthCheck),
 		ConfigFile:    json.RawMessage(def.ConfigFile),
