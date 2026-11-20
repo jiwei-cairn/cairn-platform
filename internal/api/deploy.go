@@ -19,7 +19,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jiwei-cairn/cairn-platform/internal/buildinfo"
 	"github.com/jiwei-cairn/cairn-platform/internal/config"
+	"github.com/jiwei-cairn/cairn-platform/internal/hostmetrics"
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
 	"github.com/jiwei-cairn/cairn-platform/internal/pack"
 	"github.com/jiwei-cairn/cairn-platform/internal/store"
@@ -34,7 +36,7 @@ const (
 	bakSuffix      = ".bak"
 )
 
-// precheckDeploy 包级预检：平台匹配 / 版本可解析 /（best-effort）磁盘余量。
+// precheckDeploy 包级预检：平台匹配 / 平台版本下限 /（minDiskMB>0 时）磁盘余量。
 // 名称冲突与服务存在性由调用方按 install/upgrade 模式分别判定。
 func (s *Server) precheckDeploy(m *pack.Manifest) error {
 	if m.Os != goruntime.GOOS {
@@ -43,9 +45,42 @@ func (s *Server) precheckDeploy(m *pack.Manifest) error {
 	if m.Arch != goruntime.GOARCH {
 		return fmt.Errorf("包目标架构 %s 与本机 %s 不符", m.Arch, goruntime.GOARCH)
 	}
+
+	// ── 平台版本下限（package-format.md §4 minPlatformVersion）──
+	// 语义化比较：本机平台版本 < 包要求 → 拒绝。生产构建经 ldflags 注入
+	// git describe 版本串（v1.2.0-3-gabc 形态剥掉 v 前缀即为合法 semver，
+	// 预发布段参与比较）；dev 等不可解析的版本串跳过门控并留痕，不因
+	// 开发形态阻断部署。
+	if req := strings.TrimSpace(m.MinPlatformVersion); req != "" {
+		pv := strings.TrimPrefix(strings.TrimSpace(buildinfo.Version), "v")
+		if !pack.IsSemVer(pv) {
+			logx.Module("deploy").Warn("平台版本不可解析，跳过 minPlatformVersion 门控",
+				"platformVersion", buildinfo.Version, "required", req)
+		} else if pack.MustCompareSemVer(pv, req) < 0 {
+			return fmt.Errorf("平台版本 %s 低于包要求的最低平台版本 %s，拒绝安装",
+				buildinfo.Version, req)
+		}
+	}
+
+	// ── 磁盘余量（minDiskMB>0 时按数据根所在卷精确校验）──
 	if m.MinDiskMB > 0 {
-		// 磁盘余量探测：数据根所在卷可写即视为可用，精确余量留 M2
-		//（syscall.Statfs/GetDiskFreeSpaceExW 平台差异大，此处不阻塞部署）。
+		// 数据根目录可能尚未创建（理论仅在测试/异常路径；生产中 store.Open
+		// 在启动时已建）——先确保存在，否则卷查询会因路径不存在而误报失败。
+		if err := os.MkdirAll(config.DataDir(), 0o755); err != nil {
+			return fmt.Errorf("数据目录不可写: %w", err)
+		}
+		need := uint64(m.MinDiskMB) << 20
+		if free, _, err := hostmetrics.DiskFree(config.DataDir()); err == nil {
+			if free < need {
+				return fmt.Errorf("磁盘余量不足：需至少 %d MB，数据根所在卷仅剩 %d MB 可用",
+					m.MinDiskMB, free>>20)
+			}
+		} else {
+			// 卷信息不可得（挂载点异常等）：降级为仅可写探测并留痕，
+			// 不静默放行，也不因探测手段缺失阻断部署。
+			logx.Module("deploy").Warn("磁盘余量查询失败，退化为可写探测", "err", err)
+		}
+		// 可写探测保留：余量够 ≠ 有写权限（只读挂载 / 权限收紧）。
 		probe := filepath.Join(dataDirOf(m.Name), ".diskprobe")
 		if err := os.MkdirAll(filepath.Dir(probe), 0o755); err == nil {
 			_ = os.WriteFile(probe, []byte("x"), 0o644)

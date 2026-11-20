@@ -28,6 +28,7 @@ ota-root/
 *.out
 bin/
 dist/
+.gocache/
 
 # ---- C / C++ ----
 *.o

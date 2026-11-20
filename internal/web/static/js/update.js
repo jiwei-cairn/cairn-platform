@@ -231,6 +231,15 @@ function renderUpgradeModal(t) {
 }
 
 /* ── 升级历史 ── */
+// fmtDurationMs 耗时的人读格式（台账 durationMs → "850ms / 3.2s / 1m05s"）。
+function fmtDurationMs(ms) {
+  if (ms == null || ms < 0) return '';
+  if (ms < 1000) return ms + 'ms';
+  const s = ms / 1000;
+  if (s < 60) return (s < 10 ? s.toFixed(1) : Math.round(s)) + 's';
+  return Math.floor(s / 60) + 'm' + String(Math.round(s % 60)).padStart(2, '0') + 's';
+}
+
 async function loadUpgradeRecords() {
   try {
     state.update.records = await apiGet('/upgrade/records') || [];
@@ -251,18 +260,23 @@ function renderRecords() {
   st.innerHTML = '';
   const locked = upgradeLocked();
   tb.innerHTML = rows.map(r => {
-    // 后端 UpgradeRecords 返回 {id, level, serviceId, message, at}（EventLog 口径）；
-    // 旧实现读 createdAt/serviceName/fromVersion/toVersion/source/status 全错配。
+    // 后端返回旧口径基础字段（id/level/serviceId/message/at）保证兼容；
+    // M2-8 台账起追加结构化字段（source/mode/durationMs/…），有则展示。
     const lvl = { info: ['badge-ok', '成功'], warn: ['badge-w', '警告'], error: ['badge-err', '失败'] }[r.level] || ['badge-muted', r.level || '—'];
     const svc = svcById(r.serviceId);
-    const svcName = svc ? svcTitle(svc) : ('#' + r.serviceId);
+    const svcName = r.name || (svc ? svcTitle(svc) : ('#' + r.serviceId));
+    const extra = [];
+    if (r.source) extra.push(r.source === 'ota' ? 'OTA' : '本地包');
+    if (r.mode === 'install') extra.push('首装');
+    if (r.durationMs != null && r.durationMs >= 0) extra.push('耗时 ' + fmtDurationMs(r.durationMs));
+    const extraHtml = extra.length ? ' <span class="text-muted" style="font-size:12px;">(' + extra.join(' · ') + ')</span>' : '';
     // 覆盖式升级无多版本目录，回退 = 重新上传旧版包（decisions.md B6/D1）。
     let action = '<button class="btn btn-outline-secondary btn-sm" onclick="promptLocalRollback(' + r.serviceId + ')" title="通过上传旧版本包回退"><i class="bi bi-arrow-counterclockwise me-1"></i>旧版重装</button>';
     return '<tr>' +
       '<td class="text-nowrap">' + fmtDateTime(r.at) + '</td>' +
       '<td><span class="badge ' + lvl[0] + '">' + lvl[1] + '</span></td>' +
       '<td class="fw-semibold">' + escapeHtml(svcName) + '</td>' +
-      '<td class="text-muted" style="max-width:420px;" title="' + escapeHtml(r.message) + '">' + escapeHtml(r.message) + '</td>' +
+      '<td class="text-muted" style="max-width:420px;" title="' + escapeHtml(r.message || '') + '">' + escapeHtml(r.message || '') + extraHtml + '</td>' +
       '<td class="text-end text-nowrap">' + action + '</td>' +
       '</tr>';
   }).join('');

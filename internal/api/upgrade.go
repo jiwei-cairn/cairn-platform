@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -85,6 +86,11 @@ type taskManager struct {
 	ch     chan *upgradeTask
 	wg     sync.WaitGroup
 	closed bool
+
+	// onFinish 任务到达终态后的回调（升级台账落库，M2-8）。
+	// 由 Server.New 装配；worker 收尾时以任务快照调用，失败不影响任务状态。
+	// 注意：队列满被直接拒收的任务不经 worker，不会触发本回调（未执行，不记台账）。
+	onFinish func(t *upgradeTask)
 }
 
 func newTaskManager() *taskManager {
@@ -129,6 +135,10 @@ func (m *taskManager) worker() {
 		}
 		t.UpdatedAt = time.Now()
 		m.mu.Unlock()
+		// 终态回调（升级台账 M2-8）：传快照，回调内部不再触碰 t。
+		if m.onFinish != nil {
+			m.onFinish(snapshotTask(t))
+		}
 		m.sweep() // 每轮结束清扫过期任务（不依赖数量超限）
 	}
 }
@@ -431,82 +441,270 @@ func (s *Server) UpgradeApply(w http.ResponseWriter, r *http.Request) {
 // runOtaTask OTA 任务：下载 → 校验 → 部署流水线。
 func (s *Server) runOtaTask(ctx context.Context, t *upgradeTask, entry *pack.IndexEntry, base string) error {
 	s.Tasks.updatePhase(t, PhaseDownloading, entry.URL)
-	pkgPath, err := s.otaDownload(ctx, entry, base)
+	pkgPath, err := s.otaDownload(ctx, t, entry, base)
 	if err != nil {
 		return fmt.Errorf("下载失败: %w", err)
 	}
 	return s.runDeployPipeline(ctx, t, pkgPath, "ota")
 }
 
-// otaDownload 下载包到 data/upgrade-download/ 并校验整包 sha256（S4）。
-func (s *Server) otaDownload(ctx context.Context, entry *pack.IndexEntry, base string) (string, error) {
+/* ═══════════════════ 下载可靠性（ota-server.md §7 步骤 8-9） ═══════════════════ */
+
+// maxDownloadAttempts 下载尝试次数上限（含首次），对应「不符 → 重试（最多 N 次）」。
+const maxDownloadAttempts = 3
+
+// downloadKind 错误分类，决定重试策略。
+type downloadKind int
+
+const (
+	downloadFatal   downloadKind = iota // 确定性失败：4xx / URL 非法 / 任务取消——立即返回
+	downloadRetry                       // 瞬时失败：网络错误 / 5xx——重试，保留 .part 断点
+	downloadCorrupt                     // 完整性不符：哈希/大小与清单不符——重试，丢弃 .part 从零重下
+)
+
+// downloadError 携带重试策略的下载错误。
+type downloadError struct {
+	kind downloadKind
+	err  error
+}
+
+func (e *downloadError) Error() string { return e.err.Error() }
+func (e *downloadError) Unwrap() error { return e.err }
+
+// otaDownload 下载包到 data/upgrade-download/，整包 sha256 校验通过后落位（S4）。
+//
+// 可靠性语义：
+//   - 断点续传：.part 残留字节数作为 Range 起点；服务器不支持 Range（回 200）
+//     则断点作废整包重收；416 视为「断点已收满」先做最终校验再决定去留；
+//   - 失败重试：网络错误 / 5xx 保留断点重试；哈希/大小不符丢弃 .part 从零重试；
+//     4xx 与任务取消立即失败。重试间做线性退避，每次尝试独立受 OTA 超时约束
+//    （client.Timeout 按次生效，长包不会因累计超时误判）。
+//   - 最终校验对 .part 全文件计算 sha256，续传拼接的内容同样被完整覆盖。
+//
+// .part 生命周期：任务内跨尝试复用；跨任务同名包（四元组文件名唯一）续用残点；
+// 判定损坏即删。最终成功后改名落位。
+func (s *Server) otaDownload(ctx context.Context, t *upgradeTask, entry *pack.IndexEntry, base string) (string, error) {
+	dir := config.DataDir("upgrade-download")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	dst := filepath.Join(dir, filepath.Base(strings.ReplaceAll(entry.URL, "\\", "/")))
+	part := dst + ".part"
+
+	var lastErr error
+	for attempt := 1; attempt <= maxDownloadAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", fmt.Errorf("任务已取消: %w", err)
+		}
+		if attempt > 1 {
+			// 线性退避：500ms × 已尝试次数，任务取消即刻退出。
+			select {
+			case <-time.After(time.Duration(attempt-1) * 500 * time.Millisecond):
+			case <-ctx.Done():
+				return "", fmt.Errorf("任务已取消: %w", ctx.Err())
+			}
+		}
+		if t != nil {
+			hint := ""
+			if st, err := os.Stat(part); err == nil && st.Size() > 0 {
+				hint = fmt.Sprintf("，续传自 %.1fMB", float64(st.Size())/(1<<20))
+			}
+			s.Tasks.updatePhase(t, PhaseDownloading,
+				fmt.Sprintf("下载中（第 %d/%d 次%s）", attempt, maxDownloadAttempts, hint))
+		}
+		_, err := s.otaDownloadOnce(ctx, entry, base, part)
+		if err == nil {
+			if err := os.Rename(part, dst); err != nil {
+				return "", err
+			}
+			return dst, nil
+		}
+		lastErr = err
+		var de *downloadError
+		if errors.As(err, &de) {
+			switch de.kind {
+			case downloadFatal:
+				return "", err
+			case downloadCorrupt:
+				_ = os.Remove(part) // 内容不可信，断点作废
+			}
+			// downloadRetry：保留断点直接重试
+		}
+	}
+	return "", fmt.Errorf("重试 %d 次后仍失败: %w", maxDownloadAttempts, lastErr)
+}
+
+// otaDownloadOnce 单次下载尝试：断点续传请求 → 追加写入 → 大小与整包 sha256 校验。
+// 返回本次尝试后 .part 的字节数（诊断用）。
+func (s *Server) otaDownloadOnce(ctx context.Context, entry *pack.IndexEntry, base, part string) (int64, error) {
 	cfg := s.Settings.Get()
 	timeout := cfg.OTA.TimeoutSec
 	if timeout <= 0 {
 		timeout = 30
 	}
 	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
+
 	u := entry.URL
 	if ru, err := url.Parse(u); err == nil && !ru.IsAbs() {
 		if bu, err2 := url.Parse(cleanOtaBase(base) + "/cairn/services/index.json"); err2 == nil {
 			u = bu.ResolveReference(ru).String()
 		}
 	}
-	// 请求绑定 ctx：任务超时取消时立刻中断下载，不留悬挂连接。
+
+	// 断点续传：.part 已收字节作为 Range 起点。
+	var have int64
+	if st, err := os.Stat(part); err == nil {
+		have = st.Size()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return "", err
+		return have, &downloadError{downloadFatal, fmt.Errorf("构造请求失败: %w", err)}
 	}
+	if have > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", have))
+	}
+	// 请求绑定 ctx：任务超时取消时立刻中断下载，不留悬挂连接。
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return have, &downloadError{downloadFatal, fmt.Errorf("任务已取消: %w", ctxErr)}
+		}
+		return have, &downloadError{downloadRetry, err}
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+
+	switch sc := resp.StatusCode; {
+	case sc == http.StatusPartialContent:
+		// 206：校验 Content-Range 起点与总长一致后，从断点续写。
+		start, total, ok := parseContentRange(resp.Header.Get("Content-Range"))
+		if !ok || start != have {
+			_ = os.Remove(part) // 服务器分片语义对不上，断点不可信
+			return 0, &downloadError{downloadRetry, fmt.Errorf(
+				"Content-Range 与断点不符（header %q，断点 %d）", resp.Header.Get("Content-Range"), have)}
+		}
+		if entry.SizeBytes > 0 && total > 0 && total != entry.SizeBytes {
+			return have, &downloadError{downloadFatal, fmt.Errorf(
+				"包总大小与清单不符（清单 %d，服务器 %d）", entry.SizeBytes, total)}
+		}
+	case sc == http.StatusOK:
+		// 200：服务器忽略 Range（不支持续传）→ 断点作废，响应即整包。
+		have = 0
+	case sc == http.StatusRequestedRangeNotSatisfiable:
+		// 416：断点 ≥ 总长 → .part 可能已收完；先做最终校验，通过即成功。
+		if err := verifyPart(part, entry); err == nil {
+			return have, nil
+		}
+		_ = os.Remove(part)
+		return 0, &downloadError{downloadCorrupt, fmt.Errorf("断点失效（416），将整包重下")}
+	case sc >= 500:
+		return have, &downloadError{downloadRetry, fmt.Errorf("HTTP %d", sc)}
+	default:
+		// 404/403 等确定性失败：重试无意义。
+		return have, &downloadError{downloadFatal, fmt.Errorf("HTTP %d", sc)}
 	}
-	if entry.SizeBytes > 0 && resp.ContentLength > 0 && resp.ContentLength != entry.SizeBytes {
-		return "", fmt.Errorf("包大小与清单不符（清单 %d，响应 %d）", entry.SizeBytes, resp.ContentLength)
+
+	// 快速确认：响应剩余字节数应与「清单总长 - 断点」吻合。
+	if entry.SizeBytes > 0 && resp.ContentLength > 0 {
+		if expect := entry.SizeBytes - have; resp.ContentLength != expect {
+			return have, &downloadError{downloadFatal, fmt.Errorf(
+				"剩余字节数与清单不符（应 %d，响应 %d）", expect, resp.ContentLength)}
+		}
 	}
-	dir := config.DataDir("upgrade-download")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	dst := filepath.Join(dir, filepath.Base(strings.ReplaceAll(u, "\\", "/")))
-	tmp := dst + ".part"
-	f, err := os.Create(tmp)
+
+	f, err := os.OpenFile(part, os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return "", err
+		return have, &downloadError{downloadFatal, err}
 	}
-	hasher := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, hasher), resp.Body)
+	if have == 0 {
+		_ = f.Truncate(0) // 200 回退场景：清掉不可信的旧断点内容
+	}
+	if _, err := f.Seek(have, io.SeekStart); err != nil {
+		_ = f.Close()
+		return have, &downloadError{downloadFatal, err}
+	}
+	n, copyErr := io.Copy(f, resp.Body)
 	closeErr := f.Close()
-	if err != nil {
-		_ = os.Remove(tmp)
-		return "", err
+	if copyErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return have, &downloadError{downloadFatal, fmt.Errorf("任务已取消: %w", ctxErr)}
+		}
+		return have + n, &downloadError{downloadRetry, copyErr}
 	}
 	if closeErr != nil {
-		_ = os.Remove(tmp)
-		return "", closeErr
+		return have + n, &downloadError{downloadFatal, closeErr}
 	}
 	// 下载完成后再确认一次任务未被取消：避免超时任务继续推进到部署阶段。
-	if err := ctx.Err(); err != nil {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("任务已取消: %w", err)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return have, &downloadError{downloadFatal, fmt.Errorf("任务已取消: %w", ctxErr)}
 	}
-	if entry.SizeBytes > 0 && n != entry.SizeBytes {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("下载不完整（%d/%d）", n, entry.SizeBytes)
+
+	// 最终校验：大小 + 整包 sha256（对 .part 全文件读回，覆盖续传拼接内容）。
+	if err := verifyPart(part, entry); err != nil {
+		return have + n, err
 	}
-	if got := hex.EncodeToString(hasher.Sum(nil)); got != entry.Sha256 {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("整包 sha256 不符（清单 %s…，实际 %s…）", entry.Sha256[:8], got[:8])
+	return have + n, nil
+}
+
+// verifyPart 校验 .part 的大小与整包 sha256（S4）。
+func verifyPart(path string, entry *pack.IndexEntry) error {
+	st, err := os.Stat(path)
+	if err != nil {
+		return &downloadError{downloadRetry, err}
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
-		return "", err
+	if entry.SizeBytes > 0 && st.Size() != entry.SizeBytes {
+		return &downloadError{downloadCorrupt, fmt.Errorf("下载不完整（%d/%d）", st.Size(), entry.SizeBytes)}
 	}
-	return dst, nil
+	f, err := os.Open(path)
+	if err != nil {
+		return &downloadError{downloadFatal, err}
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return &downloadError{downloadRetry, err}
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != entry.Sha256 {
+		return &downloadError{downloadCorrupt, fmt.Errorf("整包 sha256 不符（清单 %s…，实际 %s…）",
+			shortHash(entry.Sha256), shortHash(got))}
+	}
+	return nil
+}
+
+// shortHash 取哈希前 8 位用于日志/错误信息（防御空串与超短串）。
+func shortHash(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
+}
+
+// parseContentRange 解析 "bytes start-end/total"。total 为 "*" 时返回 -1（未知）。
+func parseContentRange(v string) (start, total int64, ok bool) {
+	v = strings.TrimSpace(v)
+	rest, found := strings.CutPrefix(v, "bytes ")
+	if !found {
+		return 0, 0, false
+	}
+	rangePart, totalPart, found := strings.Cut(rest, "/")
+	if !found {
+		return 0, 0, false
+	}
+	startStr, _, found := strings.Cut(rangePart, "-")
+	if !found {
+		return 0, 0, false
+	}
+	start, err := strconv.ParseInt(startStr, 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	if totalPart == "*" {
+		return start, -1, true
+	}
+	total, err = strconv.ParseInt(totalPart, 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return start, total, true
 }
 
 /* ═══════════════════ 本地上传升级 ═══════════════════ */
@@ -592,20 +790,99 @@ func (s *Server) UpgradeTask(w http.ResponseWriter, r *http.Request) {
 	ok(w, t)
 }
 
-// UpgradeRecords GET /api/upgrade/records：升级历史（EventLog type=upgrade）。
+// recordUpgradeRecord 任务终态落库（M2-8：升级台账 operator/durationMs）。
+// 由 taskManager.onFinish 在 worker 收尾时回调；落库失败仅告警，不影响任务状态。
+func (s *Server) recordUpgradeRecord(t *upgradeTask) {
+	if s.DB == nil || t == nil {
+		return
+	}
+	status := "failed"
+	if t.Phase == PhaseSuccess {
+		status = "success"
+	}
+	detail := t.Error
+	if detail == "" {
+		detail = t.Detail
+	}
+	if status == "success" {
+		if t.Mode == "install" {
+			detail = fmt.Sprintf("首次安装：%s %s（source=%s）", t.Name, t.ToVer, t.Source)
+		} else {
+			detail = fmt.Sprintf("部署完成：%s %s → %s（source=%s）", t.Name, t.FromVer, t.ToVer, t.Source)
+		}
+	}
+	rec := store.UpgradeRecord{
+		TaskID: t.ID, ServiceName: t.Name, Mode: t.Mode, Source: t.Source,
+		FromVersion: t.FromVer, ToVersion: t.ToVer,
+		Status:   status,
+		Operator: "user", // 当前全部入口均为 Web 手动；usb/auto 通道不存在，取值留作扩展
+		// 耗时口径：任务受理（入队）到终态。排队等待也计入——对使用者而言
+		// 「点了升级到看到结果」的等待就是这段时间；串行队列下排队通常极短。
+		DurationMs: time.Since(t.CreatedAt).Milliseconds(),
+		Detail:     detail,
+		FinishedAt: time.Now(),
+	}
+	var svc store.Service
+	if err := s.DB.First(&svc, "name = ?", t.Name).Error; err == nil {
+		rec.ServiceID = svc.ID
+	}
+	if err := s.DB.Create(&rec).Error; err != nil {
+		logx.Module("api").Warn("升级台账落库失败", "task", t.ID, "svc", t.Name, "err", err)
+	}
+}
+
+// UpgradeRecords GET /api/upgrade/records：升级历史（M2-8 结构化台账）。
+//
+// 响应保持旧 EventLog 口径的基础字段（id/level/serviceId/message/at）向前兼容，
+// 另追加结构化字段（taskId/name/mode/source/fromVersion/toVersion/status/
+// operator/durationMs/detail）。台账表为空时回落 EventLog(type=upgrade) 旧口径，
+// 保留升级历史连续性。
 func (s *Server) UpgradeRecords(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 200 {
 		limit = v
 	}
-	var rows []store.EventLog
-	s.DB.Where("type = ?", "upgrade").Order("id desc").Limit(limit).Find(&rows)
-	out := make([]map[string]any, 0, len(rows))
+	var rows []store.UpgradeRecord
+	s.DB.Order("id desc").Limit(limit).Find(&rows)
+
+	type recRow map[string]any
+	out := make([]recRow, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, map[string]any{
-			"id": row.ID, "level": row.Level, "serviceId": row.ServiceID,
-			"message": row.Message, "at": row.CreatedAt.UnixMilli(),
+		level := "info"
+		if row.Status != "success" {
+			level = "error"
+		}
+		msg := row.Detail
+		if msg == "" {
+			msg = fmt.Sprintf("%s %s（%s → %s）", row.ServiceName, row.Mode, row.FromVersion, row.ToVersion)
+		}
+		at := row.FinishedAt
+		if at.IsZero() {
+			at = row.CreatedAt
+		}
+		out = append(out, recRow{
+			// 旧字段（前端兼容）
+			"id": row.ID, "level": level, "serviceId": row.ServiceID,
+			"message": msg, "at": at.UnixMilli(),
+			// 结构化字段（M2-8）
+			"taskId": row.TaskID, "name": row.ServiceName,
+			"mode": row.Mode, "source": row.Source,
+			"fromVersion": row.FromVersion, "toVersion": row.ToVersion,
+			"status": row.Status, "operator": row.Operator,
+			"durationMs": row.DurationMs, "detail": row.Detail,
 		})
+	}
+
+	// 台账表为空：回落 EventLog 旧口径（首版台账启用前的历史记录）。
+	if len(out) == 0 {
+		var evs []store.EventLog
+		s.DB.Where("type = ?", "upgrade").Order("id desc").Limit(limit).Find(&evs)
+		for _, row := range evs {
+			out = append(out, recRow{
+				"id": row.ID, "level": row.Level, "serviceId": row.ServiceID,
+				"message": row.Message, "at": row.CreatedAt.UnixMilli(),
+			})
+		}
 	}
 	ok(w, out)
 }

@@ -151,6 +151,23 @@ func clampPct(v float64) float64 {
 	return v
 }
 
+/* ── 磁盘可用空间（部署预检 minDiskMB 用，api.precheckDeploy 消费） ── */
+
+// DiskFree 返回 dir 所在卷的可用字节数与总字节数。
+// linux 取 statfs 的 Bavail×Frsize——Bavail 是非特权进程实际可写的余量，
+// 比 Bfree（含 root 保留块）更保守也更贴近「这个包能不能装下」的语义。
+func DiskFree(dir string) (freeBytes, totalBytes uint64, err error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(dir, &st); err != nil {
+		return 0, 0, err
+	}
+	bsize := uint64(st.Frsize)
+	if bsize == 0 {
+		bsize = uint64(st.Bsize)
+	}
+	return uint64(st.Bavail) * bsize, uint64(st.Blocks) * bsize, nil
+}
+
 /* ── 整机运行时长与网卡累计流量 ──
 
 与 windows 侧同口径（同为「开机以来」），见 hostmetrics_windows.go 顶部说明。

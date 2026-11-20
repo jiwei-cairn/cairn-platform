@@ -67,3 +67,31 @@ type EventLog struct {
 	Message   string    `json:"message"`
 	CreatedAt time.Time `json:"-"`
 }
+
+// UpgradeRecord 升级/安装任务台账（终态才落库；进行中由任务端点内存态呈现，
+// 架构 §2.2 定稿：status 维持终态值，「进行中」不落库）。
+//
+// 与 EventLog(type=upgrade) 的分工：EventLog 是面向大盘/事件中心的事件流水，
+// 本表是面向 /api/upgrade/records 的结构化查询台账（operator/durationMs，
+// backend-architecture §2.2 增补字段）。
+//
+// status 终态按 decisions.md D10 只有两值：success（换文件完成且启动指令已发出）/
+// failed（任一阶段出错）。rolledback 不再产生——D1 已取消自动回滚（B6：回退走
+// 本地上传旧版本包），枚举留作历史数据兼容。
+// operator 当前恒为 user（Web 手动）；usb/auto 通道不存在，取值留作扩展。
+type UpgradeRecord struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	TaskID      string    `gorm:"index" json:"taskId"`
+	ServiceID   int       `json:"serviceId"` // 失败的安装可能尚无对应服务行 → 0
+	ServiceName string    `json:"serviceName"`
+	Mode        string    `json:"mode"`   // install | upgrade
+	Source      string    `json:"source"` // local | ota
+	FromVersion string    `json:"fromVersion"`
+	ToVersion   string    `json:"toVersion"`
+	Status      string    `json:"status"`   // success | failed
+	Operator    string    `json:"operator"` // user | usb | auto（当前仅 user）
+	DurationMs  int64     `json:"durationMs"` // 任务受理到终态的耗时
+	Detail      string    `json:"detail"`     // 成功摘要 / 失败原因
+	CreatedAt   time.Time `json:"-"`          // 任务受理时刻
+	FinishedAt  time.Time `json:"-"`          // 终态时刻
+}

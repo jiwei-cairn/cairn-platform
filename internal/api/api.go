@@ -213,7 +213,13 @@ type HostSource interface {
 
 // New 构造基础 Server（无演示引擎；服务定义 CRUD/设置/版本仍可用）。
 func New(db *gorm.DB, settings *store.SettingsStore, startedAt time.Time) *Server {
-	return &Server{DB: db, Settings: settings, StartedAt: startedAt, Tasks: newTaskManager()}
+	s := &Server{DB: db, Settings: settings, StartedAt: startedAt, Tasks: newTaskManager()}
+	// 任务终态回调 → 升级台账落库（M2-8：operator/durationMs）。
+	// db 为 nil 的构造形态（理论不存在，防御测试误用）不挂回调。
+	if s.DB != nil {
+		s.Tasks.onFinish = s.recordUpgradeRecord
+	}
+	return s
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

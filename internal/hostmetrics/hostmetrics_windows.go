@@ -197,6 +197,35 @@ func clampPct(v float64) float64 {
 	return v
 }
 
+/* ── 磁盘可用空间（部署预检 minDiskMB 用，api.precheckDeploy 消费） ── */
+
+// DiskFree 返回 dir 所在卷的可用字节数与总字节数。
+// windows 取 GetDiskFreeSpaceExW 的 freeToCaller——配额调整后本进程实际可写
+// 的余量，与 linux 侧 Bavail 同语义（保守、贴近「这个包能不能装下」）。
+func DiskFree(dir string) (freeBytes, totalBytes uint64, err error) {
+	if err := procGetDiskFreeSpaceExW.Find(); err != nil {
+		return 0, 0, err
+	}
+	p, err := syscall.UTF16PtrFromString(dir)
+	if err != nil {
+		return 0, 0, err
+	}
+	var freeToCaller, total, totalFree uint64
+	r, _, callErr := procGetDiskFreeSpaceExW.Call(
+		uintptr(unsafe.Pointer(p)),
+		uintptr(unsafe.Pointer(&freeToCaller)),
+		uintptr(unsafe.Pointer(&total)),
+		uintptr(unsafe.Pointer(&totalFree)),
+	)
+	if r == 0 {
+		if callErr != nil {
+			return 0, 0, callErr
+		}
+		return 0, 0, syscall.EINVAL
+	}
+	return freeToCaller, total, nil
+}
+
 /* ── 整机运行时长与网卡累计流量 ──
 
 大盘左列两卡（系统运行时长 / 网络流量）的数据源。两者同为「开机以来」口径：
