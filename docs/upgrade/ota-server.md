@@ -36,7 +36,7 @@ OTA 升级采用 **HTTP(S) 静态文件托管 + Pull 模式**。服务器只需�
     │       └── gateway-2.0.0-linux-arm64.cairnpkg
     │
     └── products/                       ← 产品 / 组态域（服务组合方案）
-        ├── index.json                  ← 产品清单（本轮仅占位）
+        ├── index.json                  ← 产品清单（真实生成，2026-11-20 修订）
         └── smart-energy/
             ├── smart-energy-1.0.0.cairnproduct
             └── smart-energy-0.9.0.cairnproduct
@@ -61,7 +61,7 @@ OTA 升级采用 **HTTP(S) 静态文件托管 + Pull 模式**。服务器只需�
 |---|---|---|
 | `cairn/index.json` | **总索引**：告知两个域的清单在哪 | ✅ 实现 |
 | `cairn/services/index.json` | **服务清单**：所有服务的所有版本 | ✅ 实现 |
-| `cairn/products/index.json` | **产品清单**：所有组态方案 | ⚠️ **仅占位** |
+| `cairn/products/index.json` | **产品清单**：所有组态方案 | ✅ 真实生成（2026-11-20 修订） |
 
 **分层拉取的意义**：设备若只需升级服务，只拉 `cairn/index.json` + `cairn/services/index.json`；未来做编排时才拉 products 域。避免清单随规模膨胀。
 
@@ -182,19 +182,41 @@ OTA 升级采用 **HTTP(S) 静态文件托管 + Pull 模式**。服务器只需�
 
 ---
 
-## 6. 产品清单 `cairn/products/index.json`（本轮占位）
+## 6. 产品清单 `cairn/products/index.json`（2026-11-20 修订：真实生成）
+
+产品域由 hub **真实生成**（扫描 `products/{name}/*.cairnproduct`，与 services 域同纪律），
+不再写 placeholder：
 
 ```jsonc
 {
   "schema": 1,
-  "generatedAt": "2026-11-09T12:00:00Z",
-  "placeholder": true,
-  "note": "产品 / 组态域尚未实现，实现留待编排功能落地",
-  "products": []
+  "generatedAt": "2026-11-20T07:00:00Z",
+  "products": [
+    {
+      "name": "smart-energy",
+      "version": "1.0.0",
+      "url": "smart-energy/smart-energy-1.0.0.cairnproduct",  // 相对本清单
+      "sha256": "…整包哈希…",
+      "sizeBytes": 1234,
+      "displayName": "…", "author": "…", "description": "…", "tags": ["…"],
+      "releasedAt": "…", "notes": "…"
+    }
+  ],
+  "signature": { /* 内容签名（trust.SignProductsIndex，与服务清单同密钥同规则） */ }
 }
 ```
 
-**本轮只建目录与占位文件**，不实现消费逻辑。设备端应识别 `placeholder: true` 并跳过。
+**生成规则**（cairn-hub Reindex）：
+
+| 规则 | 说明 |
+|---|---|
+| 包格式 | `.cairnproduct` = manifest-only ZIP（唯一条目 `manifest.json` 且为首，H3：不携带二进制） |
+| 清单字段 | `schema/name/version(语义化)/displayName/author/description/tags/releaseNotes/services[]`；`services[]` 为精确版本引用，重复引用拒绝 |
+| 引用完整性 | 引用的服务版本必须已在服务域发布（重扫对照实时集合；悬空则跳过、不纳入清单） |
+| 发布入口 | `POST /publish-product`（scope: `publish-suite`）；同名同版本同 sha 幂等、异 sha 拒绝 |
+| releasedAt | 沿用旧清单值，重扫幂等 |
+
+编排安装语义（平台按 `services[]` 引用逐个装包）随 M3 落地。
 
 ---
 
