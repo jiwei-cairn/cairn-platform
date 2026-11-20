@@ -19,11 +19,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jiwei-cairn/cairn-pkg/pack"
 	"github.com/jiwei-cairn/cairn-platform/internal/buildinfo"
 	"github.com/jiwei-cairn/cairn-platform/internal/config"
 	"github.com/jiwei-cairn/cairn-platform/internal/hostmetrics"
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
-	"github.com/jiwei-cairn/cairn-platform/internal/pack"
 	"github.com/jiwei-cairn/cairn-platform/internal/store"
 
 	goruntime "runtime"

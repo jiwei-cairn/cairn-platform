@@ -31,7 +31,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jiwei-cairn/cairn-platform/internal/pack"
+	"github.com/jiwei-cairn/cairn-pkg/pack"
 )
 
 var (

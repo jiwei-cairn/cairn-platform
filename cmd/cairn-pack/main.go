@@ -16,7 +16,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jiwei-cairn/cairn-platform/internal/pack"
+	"github.com/jiwei-cairn/cairn-pkg/pack"
 	goruntime "runtime"
 )
 
