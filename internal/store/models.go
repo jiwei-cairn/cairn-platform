@@ -61,7 +61,7 @@ type ServiceRuntime struct {
 // EventLog 事件流水（大盘“告警原因”与事件中心的数据源）。
 type EventLog struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	Type      string    `json:"type"`  // start|stop|restart|backoff|alert|usb|upgrade|settings
+	Type      string    `json:"type"`  // start|stop|restart|backoff|alert|usb|upgrade|publish|settings
 	Level     string    `json:"level"` // info | warn | error
 	ServiceID int       `json:"serviceId"`
 	Message   string    `json:"message"`

@@ -175,6 +175,8 @@ function cardHtml(s) {
   // 导出软件包（重启后）：把当前产物+清单打成 .cairnpkg 下载，可用于本机重装、
   // 回退（换设备/换版本）或发布到 OTA 服务器。禁用态服务同样可导出。
   actions += btn(0, 'bi-box-arrow-up', '导出软件包（.cairnpkg）', 'exportSvcPkg(' + s.id + ', this)', true, 'btn-outline-secondary');
+  // 发布到服务端（业务流程验证切片：导出当前安装态 → 上传 hub；认证随 Phase 3a 接入）。
+  actions += btn(0, 'bi-cloud-upload', '发布到服务端（导出并上传）', 'publishSvcToHub(' + s.id + ', this)', true, 'btn-outline-secondary');
   return '<div class="col-md-6 col-lg-4">' +
     '<div class="model-card' + (disabled ? ' svc-disabled' : '') + '" id="svc-card-' + s.id + '">' +
     '<div class="model-card-top">' +
@@ -642,6 +644,36 @@ async function exportSvcPkg(id, btnEl) {
     showToast('success', '软件包已导出：' + name);
   } catch (e) {
     showToast('danger', '导出失败：' + e.message);
+  } finally {
+    if (btnEl) btnIdle(btnEl);
+  }
+}
+
+/* ── 发布到服务端：导出当前安装态 → 上传 hub（业务流程验证，暂无认证） ── */
+async function publishSvcToHub(id, btnEl) {
+  const row = svcById(id);
+  if (!row) return;
+  const ota = (state.settings && state.settings.ota) || {};
+  if (!ota.serverUrl) {
+    showToast('warning', '尚未配置远程服务器（设置 → 远程升级 → 服务器地址）');
+    return;
+  }
+  const go = await confirmDialog({
+    title: '发布到服务端',
+    html: '将把 <b>' + escapeHtml(svcDisplayName(row)) + '</b> <code>' + escapeHtml(row.version || '—') + '</code> 的当前安装态导出为 .cairnpkg 并上传到：' +
+      '<div class="mt-1"><code>' + escapeHtml(ota.serverUrl) + '</code></div>' +
+      '<div class="mt-1 text-muted">同名同版本内容不同会被服务端拒绝（409），需先提升版本号。</div>',
+    level: 'L1', confirmText: '发布',
+  });
+  if (!go) return;
+  if (btnEl) btnBusy(btnEl, '发布中…');
+  try {
+    const r = await apiPost('/services/' + id + '/publish', {});
+    const d = r || {};
+    if (d.idempotent) showToast('info', '服务端已存在同版本同内容包（幂等，未重写）');
+    else showToast('success', '发布成功：' + (d.name || row.name) + ' ' + (d.version || row.version) + '（服务端已收录）');
+  } catch (e) {
+    showToast('danger', '发布失败：' + e.message);
   } finally {
     if (btnEl) btnIdle(btnEl);
   }

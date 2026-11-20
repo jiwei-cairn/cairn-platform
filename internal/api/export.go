@@ -41,47 +41,10 @@ func (s *Server) ExportService(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if strings.TrimSpace(def.Version) == "" {
-		fail(w, http.StatusConflict, "服务没有版本记录，无法导出（旧数据安装的服务）")
-		return
-	}
-	svcDir := filepath.Join(s.installRoot(), def.Name)
-	if _, err := os.Stat(svcDir); err != nil {
-		fail(w, http.StatusConflict, "服务产物目录缺失: "+svcDir)
-		return
-	}
 
-	// 从安装清单快照取 files/entrypoint 与展示信息（导出保真）。
-	m := new(pack.Manifest)
-	if err := json.Unmarshal(def.Manifest, m); err != nil || len(m.Files) == 0 {
-		fail(w, http.StatusConflict, "安装清单快照缺失或不完整，无法导出")
-		return
-	}
-
-	// 收集文件：按登记顺序，磁盘上缺失的条目报错（导出必须完整）。
-	var sources []pack.SourceFile
-	for _, f := range m.Files {
-		src := filepath.Join(svcDir, filepath.FromSlash(f.Path))
-		if _, err := os.Stat(src); err != nil {
-			fail(w, http.StatusConflict, fmt.Sprintf("登记文件缺失: %s", f.Path))
-			return
-		}
-		sources = append(sources, pack.SourceFile{SrcPath: src, PkgPath: f.Path, Role: f.Role, Mode: f.Mode})
-	}
-
-	// 导出文件名按规范四元组（F2）。
-	name := fmt.Sprintf("%s-%s-%s-%s.cairnpkg", def.Name, def.Version, goruntime.GOOS, goruntime.GOARCH)
-	outPath := filepath.Join(os.TempDir(), "cairn-export-"+name)
-	if _, err := pack.Build(pack.BuildOptions{
-		Name: m.Name, Version: def.Version, Os: m.Os, Arch: m.Arch,
-		Entrypoint:  m.Entrypoint,
-		DisplayName: m.DisplayName, Author: m.Author, Description: m.Description,
-		Tags: m.Tags, ServiceType: def.ServiceType, WebUrl: m.WebUrl, ReleaseNotes: m.ReleaseNotes,
-		Args: m.Args, Env: m.Env, Deps: m.Deps, Ports: m.Ports, MinDiskMB: m.MinDiskMB,
-		RestartPolicy: m.RestartPolicy, HealthCheck: m.HealthCheck,
-		LogPolicy: m.LogPolicy, ConfigFile: m.ConfigFile,
-	}, sources, outPath); err != nil {
-		fail(w, http.StatusInternalServerError, "打包失败: "+err.Error())
+	outPath, name, err := s.buildExportPackage(&def)
+	if err != nil {
+		fail(w, http.StatusConflict, err.Error())
 		return
 	}
 	defer func() {
@@ -103,4 +66,49 @@ func (s *Server) ExportService(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, f); err != nil {
 		logx.Module("api").Warn("导出传输中断", "err", err)
 	}
+}
+
+// buildExportPackage 把当前服务安装态打包为 .cairnpkg（落临时文件）。
+// 返回临时文件路径与规范文件名；调用方负责 os.Remove(path)。
+// 导出（D9）与发布上传共用；错误可直接展示给用户。
+func (s *Server) buildExportPackage(def *store.Service) (path, name string, err error) {
+	if strings.TrimSpace(def.Version) == "" {
+		return "", "", fmt.Errorf("服务没有版本记录，无法导出（旧数据安装的服务）")
+	}
+	svcDir := filepath.Join(s.installRoot(), def.Name)
+	if _, err := os.Stat(svcDir); err != nil {
+		return "", "", fmt.Errorf("服务产物目录缺失: %s", svcDir)
+	}
+
+	// 从安装清单快照取 files/entrypoint 与展示信息（导出保真）。
+	m := new(pack.Manifest)
+	if err := json.Unmarshal(def.Manifest, m); err != nil || len(m.Files) == 0 {
+		return "", "", fmt.Errorf("安装清单快照缺失或不完整，无法导出")
+	}
+
+	// 收集文件：按登记顺序，磁盘上缺失的条目报错（导出必须完整）。
+	var sources []pack.SourceFile
+	for _, f := range m.Files {
+		src := filepath.Join(svcDir, filepath.FromSlash(f.Path))
+		if _, err := os.Stat(src); err != nil {
+			return "", "", fmt.Errorf("登记文件缺失: %s", f.Path)
+		}
+		sources = append(sources, pack.SourceFile{SrcPath: src, PkgPath: f.Path, Role: f.Role, Mode: f.Mode})
+	}
+
+	// 导出文件名按规范四元组（F2）。
+	name = fmt.Sprintf("%s-%s-%s-%s.cairnpkg", def.Name, def.Version, goruntime.GOOS, goruntime.GOARCH)
+	outPath := filepath.Join(os.TempDir(), "cairn-export-"+name)
+	if _, err := pack.Build(pack.BuildOptions{
+		Name: m.Name, Version: def.Version, Os: m.Os, Arch: m.Arch,
+		Entrypoint:  m.Entrypoint,
+		DisplayName: m.DisplayName, Author: m.Author, Description: m.Description,
+		Tags: m.Tags, ServiceType: def.ServiceType, WebUrl: m.WebUrl, ReleaseNotes: m.ReleaseNotes,
+		Args: m.Args, Env: m.Env, Deps: m.Deps, Ports: m.Ports, MinDiskMB: m.MinDiskMB,
+		RestartPolicy: m.RestartPolicy, HealthCheck: m.HealthCheck,
+		LogPolicy: m.LogPolicy, ConfigFile: m.ConfigFile,
+	}, sources, outPath); err != nil {
+		return "", "", fmt.Errorf("打包失败: %w", err)
+	}
+	return outPath, name, nil
 }
