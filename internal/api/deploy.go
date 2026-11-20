@@ -111,6 +111,10 @@ func (s *Server) runDeployPipeline(ctx context.Context, t *upgradeTask, pkgPath,
 	}
 	defer p.Close()
 	m := p.Manifest
+	// ── 内容签名验证（F4 激活）：无签名放行（过渡态）；带签名必须通过信任列表 ──
+	if err := verifyContentSignature(m); err != nil {
+		return err
+	}
 
 	// ── 预检 ──
 	s.Tasks.updatePhase(t, PhasePrecheck, "平台/磁盘/版本预检")
