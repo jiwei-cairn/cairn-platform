@@ -52,7 +52,7 @@ func runShellLimited(cmdline string, env map[string]string, dir string, timeout 
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(ctx, "cmd", "/c", cmdline)
 	} else {
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", cmdline)
+		cmd = exec.CommandContext(ctx, posixShell(), "-c", cmdline)
 	}
 	if dir != "" {
 		cmd.Dir = dir
@@ -76,4 +76,18 @@ func runShellLimited(cmdline string, env map[string]string, dir string, timeout 
 		return out, err
 	}
 	return out, nil
+}
+
+// posixShell 返回可用的 POSIX shell 路径。
+//
+// 不能硬编码 /bin/sh：主流发行版与 Alpine（busybox）都有它，但部分裁剪镜像
+// （尤其 arm64 边缘设备的最小 rootfs）只提供 /bin/ash 或 /usr/bin/sh。
+// 逐个探测第一个存在的；全都不存在时仍返回 /bin/sh（由 exec 报出清晰错误）。
+func posixShell() string {
+	for _, sh := range []string{"/bin/sh", "/usr/bin/sh", "/bin/ash", "/bin/bash"} {
+		if st, err := os.Stat(sh); err == nil && !st.IsDir() {
+			return sh
+		}
+	}
+	return "/bin/sh"
 }

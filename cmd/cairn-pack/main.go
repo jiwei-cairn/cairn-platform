@@ -100,8 +100,9 @@ func parseAdd(a string) (src, pkgPath, role string, err error) {
 		}
 	}
 	i := strings.LastIndex(s, ":")
-	// 盘符冒号不是分隔符：单字母且位于首位（形如 "E:\..."）视为盘符。
-	if i == 1 && len(s) > 1 && isDriveLetter(s[0]) && (s[2] == '\\' || s[2] == '/') {
+	// 盘符冒号不是分隔符：单字母位于首位且后随 /（形如 "E:\..." 或 "E:/..."）。
+	// 不校验后随字符会把 Linux 上 "a:b" 这类合法相对路径误判成盘符。
+	if i == 1 && len(s) > 2 && isDriveLetter(s[0]) && (s[2] == '\\' || s[2] == '/') {
 		return "", "", "", fmt.Errorf("缺少包内路径（源路径的盘符冒号不能作为分隔符）")
 	}
 	if i <= 0 || i == len(s)-1 {

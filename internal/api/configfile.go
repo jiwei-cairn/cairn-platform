@@ -72,7 +72,10 @@ func normalizeCfgPath(raw, svcName string) string {
 	p = strings.ReplaceAll(p, `\`, "/")
 
 	// 形态 2/3：绝对路径，或相对但带 services 段 / 服务名段的仓库路径。
-	isAbs := strings.HasPrefix(p, "/") || (len(p) > 1 && p[1] == ':')
+	// 盘符判定要求首字符是字母且后随 /：跨平台读历史数据（Windows 库里的
+	// "C:/..."）需识别，但 Linux 上 "a:b" 这类相对路径不能误判为绝对路径。
+	isAbs := strings.HasPrefix(p, "/") ||
+		(len(p) > 2 && isASCIILetter(p[0]) && p[1] == ':' && (p[2] == '/' || p[2] == '\\'))
 	hasRepoPrefix := strings.HasPrefix(p, "services/") || strings.Contains(p, "/services/")
 	if isAbs || hasRepoPrefix {
 		// 优先按服务名定位（最可靠：服务根目录名就是服务名）。
@@ -92,6 +95,11 @@ func normalizeCfgPath(raw, svcName string) string {
 		p = strings.TrimPrefix(p, svcName+"/")
 	}
 	return filepath.ToSlash(filepath.Clean(p))
+}
+
+// isASCIILetter 判断是否为 ASCII 字母（盘符检测用）。
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // configLocation 解析配置文件的落点。
@@ -461,10 +469,19 @@ func (s *Server) pruneConfigBackups(path string, maxHistory int) {
 }
 
 // writeFileAtomicPath 原子写（.tmp + rename），保留原文件权限。
+//
+// Linux 注意：os.WriteFile 的 perm 会被进程 umask 削减（如 umask 022 把 0666
+// 变成 0644），而 rename 后新文件的权限就取自临时文件——因此必须显式 Chmod
+// 复原为原文件权限，否则保存一次就把 0640 的报告类配置降级为 0644（可能
+// 造成敏感项被同机其他用户读取）。Windows 上 chmod 是无害空操作。
 func writeFileAtomicPath(path string, data []byte, perm os.FileMode) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, perm); err != nil {
 		return err
+	}
+	// umask 补偿：显式设定目标权限（失败不阻断——保存成功优先）。
+	if err := os.Chmod(tmp, perm); err != nil {
+		logx.Module("api").Warn("调整临时文件权限失败（可能受 umask 影响）", "path", tmp, "perm", perm.String(), "err", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
