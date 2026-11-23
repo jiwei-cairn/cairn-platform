@@ -161,11 +161,14 @@ function cardHtml(s) {
     ? '<a class="svc-name-link" href="' + escapeHtml(s.webUrl) + '" target="_blank" rel="noopener" title="穿越到 ' + escapeHtml(s.webUrl) + '"><span class="led ' + meta.led + '"></span>' + escapeHtml(title) + '<i class="bi bi-box-arrow-up-right ms-1"></i></a>'
     : '<span class="led ' + meta.led + '"></span>' + escapeHtml(title);
   const avail = state.update.available[s.name]; /* available 以服务名为键（新版 check 协议） */
-  const hasWeb = !!s.webUrl;
   const hasCfg = !!(s.configFile && s.configFile.path);
   let actions = btn(0, 'bi-cloud-arrow-up' + (avail ? '-fill' : ''), avail ? '升级（最新 ' + avail.latest + '）' : '升级（OTA / 本地包）', 'openUpgradeSource(' + s.id + ')', !locked, 'btn-outline-primary');
   actions += btn(0, 'bi-trash', '卸载（停止并移除纳管）', 'svcUninstall(' + s.id + ', this)', true, 'btn-outline-danger');
-  actions += btn(0, hasWeb ? 'bi-window' : 'bi-file-earmark-code', hasWeb ? '配置（穿越服务 Web）' : hasCfg ? '配置（编辑配置文件）' : '配置（未配置）', 'svcConfig(' + s.id + ')', hasWeb || hasCfg);
+  // 配置：只做配置文件编辑（展示内容 + 修改 + 保存）。
+  // 穿越服务 Web 由卡片标题（svc-name-link）承担 —— 两个入口职责分离：
+  //   标题点击 = 进入服务自己的 Web 控制台（已实现）
+  //   配置按钮 = 编辑部署包里的配置文件
+  actions += btn(0, 'bi-file-earmark-code', hasCfg ? '配置（编辑配置文件）' : '配置（未配置）', 'svcConfig(' + s.id + ')', hasCfg);
   actions += btn(0, 'bi-sliders', '详情', 'openServiceModal(' + s.id + ')', true, 'btn-outline-primary');
   if (!disabled) {
     actions += btn(0, 'bi-play-fill', '启动', 'svcStart(' + s.id + ')', !busy && stoppedIsh && !locked, 'btn-outline-success');
@@ -680,17 +683,19 @@ async function publishSvcToHub(id, btnEl) {
 }
 
 /* ── 配置穿越：独立 Web 优先，否则配置文件编辑器 ── */
+// svcConfig 「配置」按钮入口：编辑服务配置文件。
+//
+// 职责分离（需求澄清）：
+//   - 穿越服务自己的 Web 控制台 → 点微服务卡片的**名称**（标题链接）
+//   - 配置文件内容查看/编辑/保存 → 本函数（配置按钮）
+//
+// 因此这里不再因 webUrl 存在就跳去打开服务 Web，两者互不干扰。
 function svcConfig(id) {
   const row = svcById(id);
   if (!row) return;
-  if (row.webUrl) {
-    window.open(row.webUrl, '_blank', 'noopener');
-    showToast('info', '正在打开 ' + row.name + ' 的独立 Web 页面');
+  if (!(row.configFile && row.configFile.path)) {
+    showToast('warning', '该服务未声明配置文件路径（安装包未携带 config 类文件）');
     return;
   }
-  if (row.configFile && row.configFile.path) {
-    openConfigfile(id);
-    return;
-  }
-  showToast('warning', '该服务未配置独立 Web 或配置文件路径');
+  openConfigfile(id);
 }
