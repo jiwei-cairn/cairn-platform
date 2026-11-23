@@ -49,18 +49,62 @@ type configFileView struct {
 	MaxHistory  int    `json:"maxHistory"`
 }
 
+// normalizeCfgPath 把 configFile.path 归一为「相对服务根的包内路径」。
+//
+// 历史数据里 path 出现过多种形态（实测见用户报错：services/windows/amd64/
+// nats-server/config/nats-server.conf）：
+//  1. 相对路径 config/app.conf                     → 原样
+//  2. 绝对路径 E:\...\nats-server\config\x         → 取服务名目录之后的部分
+//  3. 相对但含 services 前缀 services/{os}/{arch}/{name}/config/x → 同样剥到 config/
+//  4. 带服务名前缀 nats-server/config/x             → 去掉前缀（deploy 旧实现写法）
+//
+// 平台可能跨系统处理历史数据（Windows 上的库记录着 POSIX 绝对路径），
+// 因此绝对性判定用「字符串形态」而非 filepath.IsAbs——后者按当前 GOOS 解释，
+// 对 /opt/... 在 Windows 上返回 false。
+//
+// 归一失败（无法判定）时返回清理后的值，由调用方的穿越校验兜底拒绝。
+func normalizeCfgPath(raw, svcName string) string {
+	p := strings.TrimSpace(raw)
+	if p == "" {
+		return ""
+	}
+	// 统一分隔符：Windows 的反斜杠先归一为 /，后续全按 POSIX 形态处理。
+	p = strings.ReplaceAll(p, `\`, "/")
+
+	// 形态 2/3：绝对路径，或相对但带 services 段 / 服务名段的仓库路径。
+	isAbs := strings.HasPrefix(p, "/") || (len(p) > 1 && p[1] == ':')
+	hasRepoPrefix := strings.HasPrefix(p, "services/") || strings.Contains(p, "/services/")
+	if isAbs || hasRepoPrefix {
+		// 优先按服务名定位（最可靠：服务根目录名就是服务名）。
+		if i := strings.LastIndex(p, "/"+svcName+"/"); i >= 0 {
+			p = p[i+len(svcName)+2:]
+		} else if strings.HasPrefix(p, svcName+"/") {
+			p = strings.TrimPrefix(p, svcName+"/")
+		} else if k := strings.LastIndex(p, "/config/"); k >= 0 {
+			p = p[k+1:] // 至少保住 config/ 段
+		} else if j := strings.LastIndex(p, "/"); j >= 0 {
+			p = p[j+1:]
+		}
+	}
+
+	// 形态 4：以服务名打头的相对路径 → 去掉该前缀。
+	if svcName != "" && strings.HasPrefix(p, svcName+"/") {
+		p = strings.TrimPrefix(p, svcName+"/")
+	}
+	return filepath.ToSlash(filepath.Clean(p))
+}
+
 // configLocation 解析配置文件的落点。
 //
 // 返回绝对路径与位置标记（data / product）。cfgPath 相对服务根。
 // 两个根都不存在该文件时返回 os.ErrNotExist 包装的错误。
 func (s *Server) locateConfigFile(def *store.Service) (absPath, relPath, location string, err error) {
 	cfg := parseConfigFile(def.ConfigFile)
-	rel := strings.TrimSpace(cfg.Path)
+	rel := normalizeCfgPath(cfg.Path, def.Name)
 	if rel == "" {
 		return "", "", "", fmt.Errorf("该服务未配置配置文件路径（configFile.path 为空）")
 	}
-	// 归一为相对路径（拒绝绝对路径与穿越）。
-	rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+	// 归一后仍是相对路径；拒绝绝对路径与穿越（双重保险）。
 	if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, "../") {
 		return "", "", "", fmt.Errorf("配置文件路径不合法: %s", cfg.Path)
 	}

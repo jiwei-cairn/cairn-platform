@@ -461,7 +461,10 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadRequest, "复制配置文件失败: "+err.Error())
 			return
 		}
-		cfgPath = filepath.Join(confDir, filepath.Base(cfg))
+		// configFile.path 的语义是「相对服务根的包内路径」（如 config/x.conf），
+		// 与包格式 files[].path 一致。历史实现存过绝对路径，导致配置编辑/
+		// 启动参数解析都要额外兼容，见 normalizeCfgPath。
+		cfgPath = filepath.ToSlash(filepath.Join("config", filepath.Base(cfg)))
 	}
 	// 工作目录 = 数据目录（data/{name}）：升级覆盖产物目录时，服务运行
 	// 产生的 .db/.log 等过程文件不受影响（decisions.md E2/P2）。
