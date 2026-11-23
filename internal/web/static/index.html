@@ -567,15 +567,15 @@
       </div>
       <div class="modal-body">
         <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
-          <button class="btn btn-outline-secondary btn-sm" id="cf-validate" onclick="cfValidate()" title="执行该服务 validateCmd（不落盘）">
-            <i class="bi bi-check2-square me-1"></i>校验
-          </button>
           <span class="small" style="color:var(--muted-color)" id="cf-status">就绪</span>
           <span class="ms-auto badge badge-r d-none" id="cf-dirty">未保存更改</span>
         </div>
         <div id="cf-state"></div>
-        <textarea class="code-editor" id="cf-editor" spellcheck="false" oninput="onCfInput()" onkeydown="return onCfKeydown(event)" aria-label="配置文件编辑器"></textarea>
-        <pre class="code-preview d-none mt-3" id="cf-out"></pre>
+        <textarea class="code-editor" id="cf-editor" spellcheck="false" oninput="onCfInput()" aria-label="配置文件编辑器"></textarea>
+        <div class="info-banner mt-2">
+          <i class="bi bi-info-circle me-2" style="color:var(--primary)"></i>
+          保存后服务将重启以加载新配置。若新配置有误导致服务无法启动，卡片会显示异常告警与退出原因，届时重新编辑保存即可。
+        </div>
         <div class="form-section-divider mt-4"><span><i class="bi bi-clock-history me-1"></i>版本历史（保存自动备份）</span></div>
         <div class="table-responsive">
           <table class="table table-hover align-middle">
@@ -586,8 +586,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-light" onclick="closeConfigfile()"><i class="bi bi-x-lg me-1"></i>关闭</button>
-        <button class="btn btn-outline-primary" id="cf-save" onclick="cfSave(false)"><i class="bi bi-database-check me-1"></i>保存</button>
-        <button class="btn btn-primary" id="cf-apply" onclick="cfSave(true)"><i class="bi bi-check-lg me-1"></i>保存并生效</button>
+        <button class="btn btn-primary" id="cf-save" onclick="cfSave()"><i class="bi bi-check-lg me-1"></i>保存</button>
       </div>
     </div>
   </div>

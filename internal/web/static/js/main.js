@@ -22,9 +22,10 @@ function initModals() {
   el('service-modal').addEventListener('hide.bs.modal', onServiceModalHideGuard);
   el('service-modal').addEventListener('hidden.bs.modal', () => { smConfirmedClose = false; });
 
-  /* 配置文件 Modal：static（有未保存更改时由 JS 守卫）；关闭后返回服务 Modal */
+  /* 配置文件 Modal：dirty 时守卫关闭（确认放弃后放行）；关闭后返回服务 Modal */
   el('configfile-modal').addEventListener('hide.bs.modal', onConfigfileModalHideGuard);
   el('configfile-modal').addEventListener('hidden.bs.modal', () => {
+    cfConfirmedClose = false; /* 复位：本次关闭已完成，下次打开不继承 */
     if (currentSection === 'service' && state.editingServiceId !== null) svcModal.show();
   });
 }
