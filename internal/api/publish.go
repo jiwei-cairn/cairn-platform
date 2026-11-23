@@ -66,11 +66,21 @@ func (s *Server) PublishService(w http.ResponseWriter, r *http.Request) {
 	res, err := uploadToHub(base, pkgPath)
 	if err != nil {
 		var he *hubHTTPError
-		if errors.As(err, &he) && he.code == http.StatusConflict {
-			fail(w, http.StatusConflict, err.Error()) // 冲突透传（版本已存在且内容不同）
-			return
+		if errors.As(err, &he) {
+			switch he.code {
+			case http.StatusConflict:
+				fail(w, http.StatusConflict, err.Error()) // 冲突透传（版本已存在且内容不同）
+				return
+			case http.StatusUnauthorized, http.StatusForbidden:
+				// 认证缺口是当前阶段最常见的一类失败：给出可操作指引，
+				// 而非把 hub 的裸 401 文案直接抛给使用者。
+				fail(w, he.code, fmt.Sprintf("%s；服务端已开启发布认证，"+
+					"验证业务流程期间请以 -anon-publish 启动 cairn-hub（生产环境禁止）", err.Error()))
+				return
+			}
 		}
-		fail(w, http.StatusBadGateway, "发布失败: "+err.Error())
+		// 前缀由前端统一追加，此处只给原因（避免「发布失败：发布失败: …」）。
+		fail(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	logx.Module("api").Info("发布服务包到服务端", "svc", def.Name, "version", def.Version, "hub", base)
