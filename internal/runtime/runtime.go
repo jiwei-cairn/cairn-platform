@@ -82,9 +82,9 @@ type Runtime interface {
 type UnitExit struct {
 	ServiceID int
 	Name      string
-	ExitCode  int       // 非 0 = 异常退出（被信号杀死时 Err 携带信号信息）
-	Err       error     // Wait 返回的错误（含信号退出详情）
-	Tail      string    // 崩溃现场：stdout/stderr 尾部行缓冲（D4 留存）
+	ExitCode  int    // 非 0 = 异常退出（被信号杀死时 Err 携带信号信息）
+	Err       error  // Wait 返回的错误（含信号退出详情）
+	Tail      string // 崩溃现场：stdout/stderr 尾部行缓冲（D4 留存）
 	At        time.Time
 	Adopted   bool // true = 认领进程的对账轮询发现退出（非父子关系）
 }

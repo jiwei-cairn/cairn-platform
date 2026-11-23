@@ -32,7 +32,7 @@ func (r *Runtime) Adopt(def runtime.UnitDef) bool {
 }
 
 // startAdoptWatch 认领进程探活：退出即发 UnitExit{Adopted:true}
-//（认领进程非子进程无 Wait 事件，2s 对账轮询是唯一感知途径）。
+// （认领进程非子进程无 Wait 事件，2s 对账轮询是唯一感知途径）。
 func (r *Runtime) startAdoptWatch(u *unit, name string) {
 	go func() {
 		t := time.NewTicker(adoptProbeSec)
