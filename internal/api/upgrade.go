@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/jiwei-cairn/cairn-pkg/pack"
+	"github.com/jiwei-cairn/cairn-platform/internal/assets"
 	"github.com/jiwei-cairn/cairn-platform/internal/config"
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
 	"github.com/jiwei-cairn/cairn-platform/internal/store"
@@ -293,7 +294,7 @@ func (s *Server) UpgradeCheck(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if idx == nil {
-		idx = embeddedServicesIndex() // 仅展示（I2/I3）
+		idx = assets.EmbeddedServicesIndex() // 仅展示（I2/I3）
 	}
 
 	// 已装服务：比对最新版（D3：不一致即可升）。
