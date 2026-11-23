@@ -689,8 +689,7 @@ function svcConfig(id) {
     return;
   }
   if (row.configFile && row.configFile.path) {
-    openServiceModal(id);
-    setTimeout(() => openConfigfile(), 350);
+    openConfigfile(id);
     return;
   }
   showToast('warning', '该服务未配置独立 Web 或配置文件路径');

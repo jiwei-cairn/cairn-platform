@@ -429,11 +429,14 @@ func applyManifestPolicies(def *store.Service, m *pack.Manifest) {
 	if len(m.ConfigFile) > 0 && string(m.ConfigFile) != "null" {
 		def.ConfigFile = datatypesJSON(m.ConfigFile)
 	} else if hasConfigRole(m) {
-		// 包携带 config 文件但未声明 configFile 策略：指向包内路径。
+		// 包携带 config 文件但未声明 configFile 策略：指向包内相对路径。
+		// 注意这里必须是包内路径（如 config/app.conf）——文件按 files[].path
+		// 落盘在服务目录下，拼上服务名会得到 <svc>/cfgsvc/app.conf 这种不存在的
+		// 路径（历史 bug：配置编辑器与启动参数解析都因此找不到文件）。
 		for _, f := range m.Files {
 			if f.Role == pack.RoleConfig {
 				def.ConfigFile = mustJSON(map[string]any{
-					"path":        filepath.Join(m.Name, filepath.Base(f.Path)),
+					"path":        filepath.ToSlash(f.Path),
 					"validateCmd": "", "applyMode": "restart", "applyCmd": "", "maxHistory": 10,
 				})
 				break
