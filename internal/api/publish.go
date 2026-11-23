@@ -33,6 +33,50 @@ import (
 // 任务化 + 进度条随 Phase 3a 前端接入）。
 const publishUploadTimeout = 10 * time.Minute
 
+// hubAPI 当前平台能解析的发布协议版本（hub /healthz 的 apiVersion）。
+const hubAPIVersion = 1
+
+// probeHub 发布前探测服务端能力：识别「连到旧版二进制」这一常见故障。
+//
+// 背景：Phase 0 的 cairn-hub（种子版）与 cairn-platform 的 cmd/devserver
+// 返回纯文本 "published: …"，Phase 1 起才是 {code,data} 信封。仅凭端口与
+// 地址无法区分，旧二进制只会让发布失败于「响应解析失败: invalid character 'p'」。
+// 探针拿不到 healthz（超时/404/非 JSON）时不阻断——可能是反向代理只放行了
+// /publish，那不是版本问题；探测失败交由实际上传给出准确错误。
+func probeHub(base string) error {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(base + "/healthz")
+	if err != nil {
+		return nil // 网络层问题由上传阶段报，避免重复告警
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil // 404 等：可能反代只放行 /publish，不据此判负
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return nil
+	}
+	var health struct {
+		Server     string `json:"server"`
+		APIVersion int    `json:"apiVersion"`
+		Anonymous  *bool  `json:"anonymous"`
+	}
+	if err := json.Unmarshal(body, &health); err != nil {
+		// healthz 存在但不是 JSON → 几乎确定是旧版二进制/旧 devserver。
+		return fmt.Errorf("服务端 /healthz 响应不是 JSON，对端可能仍是旧版（devserver 或 Phase 0 种子版）；请重新构建 cairn-hub 后重启")
+	}
+	if health.APIVersion < hubAPIVersion {
+		return fmt.Errorf("服务端发布协议版本过旧（对端 apiVersion=%d，本平台需要 %d）；请重新构建 cairn-hub 后重启",
+			health.APIVersion, hubAPIVersion)
+	}
+	if health.Anonymous != nil && !*health.Anonymous {
+		return fmt.Errorf("服务端已开启发布认证，而当前平台尚未接入凭证（Phase 3a）；" +
+			"验证业务流程期间请以 -anon-publish 启动 cairn-hub（生产环境禁止）")
+	}
+	return nil
+}
+
 // PublishService POST /api/services/{id}/publish：发布当前服务到服务端。
 func (s *Server) PublishService(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
@@ -53,6 +97,11 @@ func (s *Server) PublishService(w http.ResponseWriter, r *http.Request) {
 	base := strings.TrimSpace(cfg.OTA.ServerURL)
 	if base == "" {
 		fail(w, http.StatusConflict, "尚未配置远程服务器（设置 → 远程升级 → 服务器地址）")
+		return
+	}
+	// 能力探测：把「连到旧二进制 / 未开匿名」这两类配置问题在上传前说清楚。
+	if err := probeHub(cleanOtaBase(base)); err != nil {
+		fail(w, http.StatusConflict, err.Error())
 		return
 	}
 
@@ -150,7 +199,12 @@ func uploadToHub(baseURL, pkgPath string) (json.RawMessage, error) {
 		Msg  string          `json:"msg"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
-		return nil, fmt.Errorf("服务端响应解析失败: %w", err)
+		// 非 JSON 响应：对端不是 Phase 1+ 的 cairn-hub（旧种子版/devserver）。
+		snippet := strings.TrimSpace(string(body))
+		if len(snippet) > 120 {
+			snippet = snippet[:120] + "…"
+		}
+		return nil, fmt.Errorf("服务端响应不是 JSON（对端可能仍是旧版二进制）；请重新构建 cairn-hub 后重启。原始响应: %s", snippet)
 	}
 	if env.Code != 0 {
 		return nil, fmt.Errorf("%s", env.Msg)
