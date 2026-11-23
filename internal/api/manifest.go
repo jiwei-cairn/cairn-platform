@@ -44,6 +44,7 @@ import (
 
 	"github.com/jiwei-cairn/cairn-platform/internal/config"
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
+	"github.com/jiwei-cairn/cairn-platform/internal/runtime"
 	"github.com/jiwei-cairn/cairn-platform/internal/store"
 
 	"github.com/go-chi/chi/v5"
@@ -202,21 +203,16 @@ func (s *Server) validateManifest(m *ServiceManifest, ov installOverrides) []ins
 	return issues
 }
 
-// precheck 安装预检：名称冲突 / 依赖解析 / 端口占用 / 磁盘余量。
+// precheck 安装预检：名称冲突 / 依赖解析 / 端口占用 / 磁盘余量 / 参数路径可解析。
 // error 级问题返回 false（不可安装），warn 仅提示。
+// installable 在函数末尾统一判定，确保所有追加的 issue 都能生效。
 func (s *Server) precheck(m ServiceManifest, ov installOverrides) ([]installIssue, bool) {
 	issues := s.validateManifest(&m, ov)
-	installable := true
-	for _, it := range issues {
-		if it.Level == "error" {
-			installable = false
-		}
-	}
+	var installable bool
 	// 1) 名称冲突：同名服务已存在。
 	var conflict store.Service
 	if err := s.DB.First(&conflict, "name = ?", m.Name).Error; err == nil {
 		issues = append(issues, installIssue{"error", "name", "服务名已被「" + conflict.Name + "」使用（先卸载或换名）"})
-		installable = false
 	}
 	// 2) 依赖解析：按名找服务，缺失提示先安装。
 	for _, dep := range m.Deps {
@@ -224,7 +220,6 @@ func (s *Server) precheck(m ServiceManifest, ov installOverrides) ([]installIssu
 		s.DB.Model(&store.Service{}).Where("name = ?", dep).Count(&n)
 		if n == 0 {
 			issues = append(issues, installIssue{"error", "deps", "依赖「" + dep + "」未安装，请先安装依赖"})
-			installable = false
 		}
 	}
 	// 3) 端口占用（best-effort：试绑定成功即视为空闲）。
@@ -235,7 +230,6 @@ func (s *Server) precheck(m ServiceManifest, ov installOverrides) ([]installIssu
 		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", p))
 		if err != nil {
 			issues = append(issues, installIssue{"error", "ports", fmt.Sprintf("端口 %d 已被占用（请先停用占用它的系统服务）", p)})
-			installable = false
 			continue
 		}
 		_ = ln.Close()
@@ -254,19 +248,16 @@ func (s *Server) precheck(m ServiceManifest, ov installOverrides) ([]installIssu
 	if m.Os != "" && m.Os != goruntime.GOOS {
 		issues = append(issues, installIssue{"error", "os",
 			fmt.Sprintf("包目标平台 %s 与本机 %s 不符", m.Os, goruntime.GOOS)})
-		installable = false
 	}
 	if m.Arch != "" && m.Arch != goruntime.GOARCH {
 		issues = append(issues, installIssue{"error", "arch",
 			fmt.Sprintf("包目标架构 %s 与本机 %s 不符", m.Arch, goruntime.GOARCH)})
-		installable = false
 	}
 	// 6) 暂存文件架构校验：主程序与依赖文件按文件头（ELF/PE）判定目标平台，
 	//    与本机不符即拒装（Windows 运行只收 .exe；Linux 按 amd64/arm/arm64）。
 	for _, f := range append([]string{ov.LocalBinary}, ov.ExtraBinaries...) {
 		if it := checkArchMatch("files", f); it != nil {
 			issues = append(issues, *it)
-			installable = false
 		}
 	}
 	// 7) 同名 systemd 单元残留提醒（adopt 退役后的冲突防御提示）。
@@ -276,7 +267,66 @@ func (s *Server) precheck(m ServiceManifest, ov installOverrides) ([]installIssu
 			issues = append(issues, installIssue{"warn", "systemd", "检测到同名 systemd 单元 " + m.Name + ".service，建议先 disable --now 避免冲突"})
 		}
 	}
+	// 8) 启动参数引用的文件可解析性（方案 A 预检）。
+	//    规则与运行期 runtime.ResolveArgs 完全一致——预检通过即运行期能找到。
+	//    安装前产物尚未落盘，故此处按「本次安装将产生的产物目录 + 数据目录」
+	//    预演：InitialConfig 会落到 config/{basename}，据此推断可解析性。
+	issues = append(issues, s.precheckArgPaths(m, ov)...)
+
+	// installable 必须在本函数**所有** issue 产出之后统一判定——
+	// 早期判定会让后续追加的 error 级问题（如第 8 项 args）无法阻断安装。
+	installable = true
+	for _, it := range issues {
+		if it.Level == "error" {
+			installable = false
+			break
+		}
+	}
 	return issues, installable
+}
+
+// precheckArgPaths 检查启动参数里引用的相对路径能否被解析。
+//
+// 为什么需要：参数写 -c ./config/x.conf 而配置文件没随包提供时，安装会成功，
+// 但服务每次启动都因找不到配置而退出（现场表现为「装完起不来」）。
+// 在预检阶段拦下并把可用路径说清楚，比让用户读崩溃日志划算得多。
+//
+// 判定依据（全部只读、不落盘）：
+//   - 产物目录 = 本次安装的目标目录（可能已存在同名目录时取已存在内容）
+//   - 数据目录 = data/{name}（当前存在的内容）
+//   - 本次上传的 InitialConfig 将落到 config/{basename}，计入「将存在」
+//
+// 判据与运行期 runtime.ResolveArgs 一致：只有「两处都找不到」才阻断。
+func (s *Server) precheckArgPaths(m ServiceManifest, ov installOverrides) []installIssue {
+	args := m.Args
+	if ov.Args != nil {
+		args = ov.Args
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	prodDir := filepath.Join(s.installRoot(), m.Name)
+	workDir := config.DataDir(m.Name)
+
+	// 「将存在」集合：本次安装会上传的配置文件（落 config/{basename}）。
+	willExist := map[string]bool{}
+	if cfg := strings.TrimSpace(ov.InitialConfig); cfg != "" {
+		willExist[filepath.ToSlash(filepath.Join("config", filepath.Base(cfg)))] = true
+	}
+
+	// 缺失项 = 探针结果，扣除「本次安装将提供」的部分。
+	missing := runtime.MissingArgPaths(args, workDir, prodDir, true)
+	var issues []installIssue
+	for _, a := range missing {
+		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(a)))
+		if willExist[clean] {
+			continue // 本次安装会提供
+		}
+		issues = append(issues, installIssue{"error", "args",
+			fmt.Sprintf("启动参数引用 %q 但该文件不存在：既不在数据目录 data/%s/，"+
+				"也不在产物目录 config/ 下。请在上传时提供该配置文件，或修正启动参数。", a, m.Name)})
+	}
+	return issues
 }
 
 // InstallPrecheck POST /api/services/install：仅预检，返回问题清单与可安装结论。

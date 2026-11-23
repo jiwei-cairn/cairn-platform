@@ -9,6 +9,9 @@ package fork
 import (
 	"errors"
 	"fmt"
+	"github.com/jiwei-cairn/cairn-platform/internal/logx"
+	"github.com/jiwei-cairn/cairn-platform/internal/runtime"
+	"github.com/jiwei-cairn/cairn-platform/internal/svclog"
 	"io"
 	"os"
 	"os/exec"
@@ -17,42 +20,39 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"github.com/jiwei-cairn/cairn-platform/internal/logx"
-	"github.com/jiwei-cairn/cairn-platform/internal/runtime"
-	"github.com/jiwei-cairn/cairn-platform/internal/svclog"
 )
 
 // stopGrace Stop 未显式给超时的默认宽限（与文档停止序列一致）。
 const (
-	stopGrace      = 10 * time.Second
-	killGrace      = 3 * time.Second
-	adoptProbeSec  = 2 * time.Second // 认领进程探活周期（supervisor 对账同节奏）
-	tailLines      = 200             // 崩溃现场尾部行数（D4）
-	exitsBuffer    = 64
+	stopGrace     = 10 * time.Second
+	killGrace     = 3 * time.Second
+	adoptProbeSec = 2 * time.Second // 认领进程探活周期（supervisor 对账同节奏）
+	tailLines     = 200             // 崩溃现场尾部行数（D4）
+	exitsBuffer   = 64
 )
 
 var errClosed = errors.New("fork runtime 已关闭")
 
 // unit 一个受管进程的全部内存态（亲管或认领）。
 type unit struct {
-	def     runtime.UnitDef
-	mu      sync.Mutex
-	pid     int
-	job     uintptr // Windows Job Object 句柄（进程树终结用；linux 恒 0）
-	started bool    // 亲管且 Wait 未返回，或认领存活
-	adopted bool
-	cmd     *exec.Cmd
-	done    chan struct{} // 亲管进程 Wait 完成信号
-	exitCh  bool          // exit 事件已发出（防重）
+	def      runtime.UnitDef
+	mu       sync.Mutex
+	pid      int
+	job      uintptr // Windows Job Object 句柄（进程树终结用；linux 恒 0）
+	started  bool    // 亲管且 Wait 未返回，或认领存活
+	adopted  bool
+	cmd      *exec.Cmd
+	done     chan struct{} // 亲管进程 Wait 完成信号
+	exitCh   bool          // exit 事件已发出（防重）
 	exitCode int
 	exitErr  error
 	// expectedStop 平台已发起过 Stop：此后进程的退出（含宽限期后强杀导致的
 	// 非零退出码）属「预期停止」而非「异常崩溃」。Status 据此折叠为 stopped，
 	// 否则 Windows 上不响应 CTRL_BREAK 的进程会被强杀成 exit=1 并被误判 failed。
 	expectedStop bool
-	since    time.Time
-	starttime string        // linux /proc starttime（认领校验用）
-	tail    *tailBuffer
+	since        time.Time
+	starttime    string // linux /proc starttime（认领校验用）
+	tail         *tailBuffer
 }
 
 func (u *unit) alive() bool {
@@ -172,7 +172,15 @@ func (r *Runtime) Start(name string, timeout time.Duration) error {
 			workDir = abs
 		}
 	}
-	cmd := exec.Command(exePath, def.Args...)
+	// 相对路径参数解析（方案 A）：workDir 优先，缺失时回落到产物目录并改写为
+	// 绝对路径。典型场景：nats-server -c ./config/nats-server.conf，配置随包
+	// 留在产物目录，而工作目录是 data/{name}（P2 数据与产物分离）。
+	args, rewrites := runtime.ResolveArgs(def.Args, workDir, runtime.ServiceRoot(exePath, def.Name))
+	for _, rw := range rewrites {
+		logx.Module("runtime").Info("启动参数相对路径已解析到产物目录",
+			"svc", def.Name, "from", rw.From, "to", rw.To)
+	}
+	cmd := exec.Command(exePath, args...)
 	cmd.Dir = workDir
 	cmd.Env = mergeEnv(os.Environ(), def.Env)
 	cmd.WaitDelay = 3 * time.Second // 进程死后管道最多等 3s（防子进程持有句柄卡 Wait）
