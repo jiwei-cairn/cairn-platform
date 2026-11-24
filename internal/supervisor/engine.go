@@ -26,6 +26,12 @@ type Engine struct {
 	defs    map[int]store.Service
 	graph   *Graph
 	closed  bool
+
+	// OnRunning 服务进入 running 态时的回调（serviceID, name）。
+	// 用途（P1-2）：api 层订阅启动验证通过事件，固化 lastgood 配置快照。
+	// 依赖方向：supervisor 不懂配置文件——钩子由 adapt 装配注入。
+	// 可为 nil（测试形态）；回调 panic 或阻塞不影响状态迁移（异步调用）。
+	OnRunning func(serviceID int, name string)
 }
 
 // NewEngine 构造引擎（不启动；Init 完成装配与拉起）。
@@ -37,6 +43,23 @@ func NewEngine(rt runtime.Runtime, db *gorm.DB) *Engine {
 		defs:    make(map[int]store.Service),
 		graph:   BuildGraph(nil),
 	}
+}
+
+// notifyRunning 触发 OnRunning 钩子（异步，不阻塞迁移路径）。
+// 必须在持锁段外调用：回调经 api 层会走 DB/文件 IO。
+func (e *Engine) notifyRunning(serviceID int, name string) {
+	if e.OnRunning == nil {
+		return
+	}
+	fn, id, n := e.OnRunning, serviceID, name
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logx.Module("supervisor").Warn("OnRunning 回调 panic（已吞并，不影响监管）", "id", id, "panic", r)
+			}
+		}()
+		fn(id, n)
+	}()
 }
 
 // Init 平台启动装配：登记期望态 → 认领对齐（孤儿零中断）→ 启动 workers →
@@ -140,10 +163,10 @@ func (e *Engine) workerByID(id int) *worker {
 func (e *Engine) Apply(services []store.Service) {
 	e.mu.Lock()
 	type action struct {
-		add    *store.Service
-		update *store.Service
+		add     *store.Service
+		update  *store.Service
 		restart bool
-		remove int
+		remove  int
 	}
 	var acts []action
 	newIDs := make(map[int]bool, len(services))

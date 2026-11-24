@@ -290,6 +290,22 @@ func (s *Server) SaveService(w http.ResponseWriter, r *http.Request) {
 		def.Version = exist.Version
 		def.Manifest = exist.Manifest
 		def.InstalledAt = exist.InstalledAt
+		// 策略字段同理：payload 未显式提供（空 JSON）时从旧行透传。否则 API
+		// 直连调用者（脚本/集成，不经前端 serviceToPayload）编辑一次 args 就
+		// 会把安装时生成的 configFile.path 清空——lastgood 快照、配置编辑器、
+		// 启动参数解析全部跟着失联（E2E 实测踩坑）。
+		if len(p.RestartPolicy) == 0 || string(p.RestartPolicy) == "null" {
+			def.RestartPolicy = exist.RestartPolicy
+		}
+		if len(p.HealthCheck) == 0 || string(p.HealthCheck) == "null" {
+			def.HealthCheck = exist.HealthCheck
+		}
+		if len(p.ConfigFile) == 0 || string(p.ConfigFile) == "null" {
+			def.ConfigFile = exist.ConfigFile
+		}
+		if len(p.LogPolicy) == 0 || string(p.LogPolicy) == "null" {
+			def.LogPolicy = exist.LogPolicy
+		}
 		fingerprintChanged := exist.ExePath != def.ExePath ||
 			exist.AutoStart != def.AutoStart || exist.Enabled != def.Enabled ||
 			string(exist.Args) != string(def.Args) || string(exist.Env) != string(def.Env)

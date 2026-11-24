@@ -228,7 +228,7 @@ function productCardHtml(p) {
     '</div>';
 }
 
-/* ══════════════ 市场安装流（manifest 说明文档 → 预检 → 安装） ══════════════ */
+/* ══════════════ 市场安装流（包驱动：OTA 下载 → 部署管线；P0 修复） ══════════════ */
 let installCtx = null; /* { manifest, suite:bool } */
 
 function openInstallModal(name, isProduct) {
@@ -250,73 +250,45 @@ function openInstallModal(name, isProduct) {
   const deps = manifest.deps || [];
   const missing = deps.filter(d => !state.services.some(s => s.name === d));
   if (!deps.length) depBanner.innerHTML = '<i class="bi bi-check-circle me-2" style="color:var(--success)"></i>无前置依赖，可直接安装';
-  else if (missing.length) depBanner.innerHTML = '<i class="bi bi-exclamation-triangle-fill me-2" style="color:var(--warning)"></i>依赖 <b>' + missing.map(escapeHtml).join('、') + '</b> 尚未安装，预检将阻止安装（请先安装依赖）';
+  else if (missing.length) depBanner.innerHTML = '<i class="bi bi-exclamation-triangle-fill me-2" style="color:var(--warning)"></i>依赖 <b>' + missing.map(escapeHtml).join('、') + '</b> 尚未安装，请先安装依赖（安装将被阻止）';
   else depBanner.innerHTML = '<i class="bi bi-check-circle me-2" style="color:var(--success)"></i>依赖已就绪：' + deps.map(escapeHtml).join('、');
-  setVal('im-args', (manifest.args || []).join('\n'));
-  setVal('im-env', Object.entries(manifest.env || {}).map(([k, v]) => k + '=' + v).join('\n'));
-  setChecked('im-autoStart', true);
-  setChecked('im-enabled', true);
-  setVal('im-priority', 100);
-  setHtml('im-precheck', '<div class="text-muted small">点击「预检并安装」后显示检查结果</div>');
   btnIdle(el('im-confirm'));
   installModal.show();
 }
 
+/* doInstall 包驱动安装（P0 修复）：依赖就绪检查 → POST /upgrade/apply
+ *（服务不存在时后端自动走 install 模式）→ 复用升级任务弹窗展示
+ * 下载 → 校验 → 预检 → 落盘 → 建档全程。
+ *
+ * 修复前的问题：POST /services/install 只传目录元数据、不带安装产物，
+ * 后端必然因「缺少安装产物」拒绝——市场「安装」按钮从未真正可用。 */
 async function doInstall() {
   if (!installCtx) return;
   const m = installCtx.manifest;
+  const missing = (m.deps || []).filter(d => !state.services.some(s => s.name === d));
+  if (missing.length) {
+    showToast('warning', '请先安装依赖：' + missing.map(escapeHtml).join('、'));
+    return;
+  }
+  if (upgradeLocked()) { showToast('warning', '已有部署任务进行中，请稍候'); return; }
   const btn = el('im-confirm');
-  btnBusy(btn, '安装中…');
-  setHtml('im-precheck', loadingState('预检并安装中…'));
+  btnBusy(btn, '提交安装…');
   try {
-    const env = {};
-    String(val('im-env')).split('\n').map(s => s.trim()).filter(Boolean).forEach(line => {
-      const i = line.indexOf('=');
-      if (i > 0) env[line.slice(0, i)] = line.slice(i + 1);
-    });
-    const r = await apiPost('/services/install', {
-      manifest: m,
-      overrides: {
-        args: String(val('im-args')).split('\n').map(s => s.trim()).filter(Boolean),
-        env,
-        enabled: checked('im-enabled'),
-        autoStart: checked('im-autoStart'),
-        priority: toNum(val('im-priority'), 100),
-      },
-    });
-    renderInstallIssues(r.issues || [], true);
-    showToast('success', '安装完成：' + (m.displayName || m.name) + ' ' + m.version);
-    await loadServices(true);
-    renderServiceCards();
-    renderMarketGrid();
-    setTimeout(() => { installModal.hide(); switchSection('service'); const card = el('svc-card-' + r.id); if (card) card.classList.add('svc-card-fade-in'); }, 900);
+    const r = await apiPost('/upgrade/apply', { name: m.name });
+    installModal.hide();
+    /* 复用升级任务的弹窗/横幅/轮询；mode=install 时管线走安装分支
+     * （无停服阶段，swapping 阶段映射到「安装」）。 */
+    state.update.taskId = r.taskId;
+    state.update.taskActive = true;
+    openUpgradeModal();
+    startTaskPolling();
+    renderTaskBanner();
+    showToast('info', '已受理（安装 ' + (m.displayName || m.name) + ' ' + (m.version || '') + '），任务执行中');
   } catch (e) {
-    renderInstallIssues(e.issues, false, e.message);
-    showToast('danger', '安装失败：' + e.message);
+    showToast('danger', '安装受理失败：' + e.message);
+  } finally {
     btnIdle(btn);
-    return;
   }
-  btnIdle(btn);
-}
-
-function renderInstallIssues(issues, okFlag, errMsg) {
-  const wrap = el('im-precheck');
-  if (errMsg && !(issues && issues.length)) {
-    wrap.innerHTML = '<div class="um-result-banner err"><i class="bi bi-x-octagon-fill me-2"></i>' + escapeHtml(errMsg) + '</div>';
-    return;
-  }
-  const list = issues || [];
-  const errs = list.filter(i => i.level === 'error');
-  const warns = list.filter(i => i.level === 'warn');
-  let html = '';
-  if (okFlag) html += '<div class="um-result-banner ok mb-2"><i class="bi bi-check-circle-fill me-2"></i>安装成功' + (warns.length ? '（' + warns.length + ' 条提示）' : '') + '</div>';
-  else if (errs.length) html += '<div class="um-result-banner err mb-2"><i class="bi bi-x-octagon-fill me-2"></i>预检未通过（' + errs.length + ' 项阻断）</div>';
-  if (list.length) {
-    html += '<ul class="mb-0 ps-3" style="font-size:13px;">' + list.map(i =>
-      '<li class="mt-1"><i class="bi ' + (i.level === 'error' ? 'bi-x-circle-fill' : 'bi-exclamation-triangle-fill') + ' me-1" style="color:var(--' + (i.level === 'error' ? 'danger' : 'warning') + ')"></i>' +
-      '<b>' + escapeHtml(i.item) + '</b>：' + escapeHtml(i.msg) + '</li>').join('') + '</ul>';
-  } else if (!okFlag) html += '<div class="text-muted small">无预检问题</div>';
-  wrap.innerHTML = html;
 }
 
 /* ── 产品套件安装：按清单顺序逐个安装（依赖顺序由套件定义保证） ── */
@@ -337,21 +309,45 @@ function openSuiteInstall(suite) {
   }).then(ok => { if (ok) installSuite(items); });
 }
 
+/* installSuite 套件安装（P0 修复）：逐个提交 OTA 安装并等待终态。
+ * 服务端任务队列全局串行（D7），逐个等待让每个服务的成败可明确定位
+ * （装到哪个断、装了几个，都有清楚反馈）。 */
 async function installSuite(items) {
   let done = 0, skipped = 0, failed = null;
   for (const m of items) {
     if (state.services.some(s => s.name === m.name)) { skipped++; continue; }
     try {
-      await apiPost('/services/install', { manifest: deepCopy(m), overrides: { autoStart: true, enabled: true, priority: 100 } });
+      const r = await apiPost('/upgrade/apply', { name: m.name });
+      const ok = await waitUpgradeTaskDone(r.taskId);
+      if (!ok) { failed = { name: m.name, msg: '部署任务失败' }; break; }
       done++;
+      await loadServices(true); /* 刷新本地列表：后续条目的「跳过已装」判定要用 */
+      renderServiceCards();
     } catch (e) { failed = { name: m.name, msg: e.message }; break; }
   }
-  await loadServices(true);
-  renderServiceCards();
   renderMarketGrid();
   if (failed) showToast('warning', '套件安装中断于「' + failed.name + '」：' + failed.msg + '（已装 ' + done + ' 个）');
   else showToast('success', '套件安装完成：新装 ' + done + ' 个，跳过已装 ' + skipped + ' 个');
   switchSection('service');
+}
+
+/* waitUpgradeTaskDone 轮询部署任务至终态（success → true / failed → false）。
+ * 内联等待：不占 update.js 的全局任务弹窗态（套件逐个装时弹窗不弹）。
+ * 任务查询连续失败 10 次按失败处理（平台重启/网络异常时防死等）。 */
+function waitUpgradeTaskDone(taskId) {
+  return new Promise(resolve => {
+    let errs = 0;
+    const timer = setInterval(async () => {
+      try {
+        const t = await apiGet('/upgrade/tasks/' + encodeURIComponent(taskId));
+        errs = 0;
+        if (t.phase === 'success') { clearInterval(timer); resolve(true); }
+        else if (t.phase === 'failed') { clearInterval(timer); resolve(false); }
+      } catch (e) {
+        if (++errs >= 10) { clearInterval(timer); resolve(false); }
+      }
+    }, 1000);
+  });
 }
 
 /* ══════════════════════════════════════════════

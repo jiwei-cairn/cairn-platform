@@ -123,9 +123,14 @@ const TASK_PHASE_MAP = {
 };
 function adaptTask(t) {
   const m = TASK_PHASE_MAP[t.phase] || TASK_PHASE_MAP.queued;
+  let key = m.key, idx = m.idx;
+  /* install 模式（市场安装/OTA 首装）没有「停服」阶段，包的落盘也不经过
+   * 「切换」语义：swapping 映射到「安装」，任务弹窗的阶段清单与实际
+   * 执行管线保持一致（P0：市场安装改走部署管线后的展示适配）。 */
+  if (t.mode === 'install' && t.phase === 'swapping') { key = 'install'; idx = 4; }
   return {
     status: t.phase === 'success' ? 'success' : t.phase === 'failed' ? 'failed' : 'running',
-    phase: m.key, phaseIndex: m.idx, mode: t.source === 'ota' ? 'ota' : 'manual',
+    phase: key, phaseIndex: idx, mode: t.source === 'ota' ? 'ota' : 'manual',
     serviceName: t.name, targetVersion: t.toVersion, fromVersion: t.fromVersion,
     detail: t.error || t.detail || '', source: t.source, taskId: t.taskId,
   };

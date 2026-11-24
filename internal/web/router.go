@@ -67,11 +67,12 @@ func Router(s *api.Server) http.Handler {
 		r.Post("/services/{id}/restart", s.RestartService)
 		r.Get("/services/{id}/stats", s.ServiceStats)
 
-		// 配置文件五动作：读/存(dryRun)/校验/生效/历史。
+		// 配置文件五动作：读/存(dryRun)/校验/生效/历史 + 恢复最后正常配置（P1-2）。
 		r.Get("/services/{id}/configfile", s.GetConfigfile)
 		r.Put("/services/{id}/configfile", s.PutConfigfile)
 		r.Post("/services/{id}/configfile/validate", s.ValidateConfigfile)
 		r.Post("/services/{id}/configfile/apply", s.ApplyConfigfile)
+		r.Post("/services/{id}/configfile/restore", s.RestoreConfigfile)
 		r.Get("/services/{id}/configfile/history", s.ConfigfileHistory)
 
 		// 日志：快照 + SSE 实时 + zip 导出。

@@ -67,6 +67,9 @@ func main() {
 	// fork 真引擎装配（登记目录锚定数据根，而非进程 CWD）。
 	eng := supervisor.NewEngine(fork.New(config.RuntimeDir()), db)
 	server := api.New(db, settings, time.Now())
+	// P1-2：启动验证通过 → 固化 lastgood 配置快照（api 层实现，
+	// supervisor 只回调不感知配置文件；详见 api.SnapshotLastgood）。
+	eng.OnRunning = server.SnapshotLastgood
 	server.RuntimeName = "fork"
 	server.Supervisor = adapt.SupervisorAdapter{Eng: eng}
 	server.Defs = adapt.DefsHook{Eng: eng}

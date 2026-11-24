@@ -56,9 +56,9 @@ const (
 	workerCmdBuf    = 16
 	reconcileEvery  = 2 * time.Second
 	snapshotEvery   = 30 * time.Second
-	fastDeathSec    = 2 * time.Second  // 防抖阈值：上次启动后存活 <2s 即死
-	fastDeathAdd    = 5 * time.Second  // 快死额外退避
-	depAlarmEvery   = time.Minute      // 依赖不可用告警去抖
+	fastDeathSec    = 2 * time.Second // 防抖阈值：上次启动后存活 <2s 即死
+	fastDeathAdd    = 5 * time.Second // 快死额外退避
+	depAlarmEvery   = time.Minute     // 依赖不可用告警去抖
 	startTimeoutPad = 10 * time.Second
 )
 
@@ -90,7 +90,7 @@ type worker struct {
 	nextRetryAt    time.Time
 	startingAt     time.Time
 	pendingRestart bool
-	depAlarmAt      time.Time
+	depAlarmAt     time.Time
 
 	// 进程指标（2s 对账周期采集，/proc 或 GetProcessTimes 差分）
 	lastCpuTime   float64
@@ -619,6 +619,11 @@ func (w *worker) transition(to State, level, typ, msg string, args ...any) bool 
 
 	w.eng.saveRuntime(row)
 	w.eng.event(level, typ, w.id, name, fmt.Sprintf(msg, args...))
+	// P1-2：启动验证通过（进入 running）→ 触发 OnRunning 钩子
+	//（api 层固化 lastgood 配置快照；异步，不阻塞迁移路径）。
+	if to == StateRunning {
+		w.eng.notifyRunning(w.id, name)
+	}
 	return true
 }
 
@@ -648,9 +653,9 @@ func (w *worker) snapshot() Snap {
 		State: string(w.st), Pid: w.pid, UptimeSec: up,
 		RestartTotal: w.row.RestartTotal, RestartFailures: w.row.RestartFailures,
 		ConsecutiveFailures: w.row.ConsecutiveFailures,
-		HealthState: w.row.HealthState, LastError: w.row.LastError,
+		HealthState:         w.row.HealthState, LastError: w.row.LastError,
 		LastExitCode: w.row.LastExitCode,
-		CpuPct: w.curCpuPct, MemMB: w.curMemMB, CpuTimeSec: w.curCpuTimeSec,
+		CpuPct:       w.curCpuPct, MemMB: w.curMemMB, CpuTimeSec: w.curCpuTimeSec,
 	}
 }
 

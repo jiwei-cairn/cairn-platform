@@ -574,12 +574,12 @@
         <textarea class="code-editor" id="cf-editor" spellcheck="false" oninput="onCfInput()" aria-label="配置文件编辑器"></textarea>
         <div class="info-banner mt-2">
           <i class="bi bi-info-circle me-2" style="color:var(--primary)"></i>
-          保存后服务将重启以加载新配置。若新配置有误导致服务无法启动，卡片会显示异常告警与退出原因，届时重新编辑保存即可。
+          保存后服务将重启以加载新配置。若新配置有误导致服务无法启动，卡片会显示异常告警，届时可继续修改重试，或用下方「恢复」回到最后正常版本。
         </div>
-        <div class="form-section-divider mt-4"><span><i class="bi bi-clock-history me-1"></i>版本历史（保存自动备份）</span></div>
+        <div class="form-section-divider mt-4"><span><i class="bi bi-clock-history me-1"></i>最后正常配置（服务启动验证通过时自动留存）</span></div>
         <div class="table-responsive">
           <table class="table table-hover align-middle">
-            <thead><tr><th>时间</th><th>操作者</th><th class="num-cell">字节数</th><th class="text-end">操作</th></tr></thead>
+            <thead><tr><th>快照时间</th><th class="num-cell">字节数</th><th class="text-end">操作</th></tr></thead>
             <tbody id="cf-history-tbody"></tbody>
           </table>
         </div>
@@ -628,7 +628,7 @@
   </div>
 </div>
 
-<!-- ═══════════ ⧉ install-modal（市场安装：manifest 预填 + 参数覆盖 + 预检） ═══════════ -->
+<!-- ═══════════ ⧉ install-modal（市场安装：包驱动 OTA 下载 → 部署管线） ═══════════ -->
 <div class="modal fade" id="install-modal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -647,45 +647,17 @@
         </div>
         <div class="info-banner mb-3" id="im-dep-banner" role="status"></div>
 
-        <!-- 运行参数覆盖 -->
-        <div class="form-section-divider"><span><i class="bi bi-sliders me-1"></i>运行参数（可覆盖清单默认值）</span></div>
-        <div class="row g-3">
-          <div class="col-md-6">
-            <label class="form-label fw-semibold" for="im-args">参数（每行一个）</label>
-            <textarea class="form-control" id="im-args" rows="3"></textarea>
-          </div>
-          <div class="col-md-6">
-            <label class="form-label fw-semibold" for="im-env">环境变量（每行 KEY=VALUE）</label>
-            <textarea class="form-control" id="im-env" rows="3"></textarea>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">开机自启</label>
-            <div class="form-check form-switch ms-1 mt-2">
-              <input class="form-check-input" type="checkbox" id="im-autoStart" checked>
-              <label class="form-check-label small" for="im-autoStart">autoStart（按依赖拓扑序拉起）</label>
-            </div>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">安装后启用监管</label>
-            <div class="form-check form-switch ms-1 mt-2">
-              <input class="form-check-input" type="checkbox" id="im-enabled" checked>
-              <label class="form-check-label small" for="im-enabled">enabled</label>
-            </div>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label fw-semibold" for="im-priority">优先级</label>
-            <input type="number" class="form-control" id="im-priority" value="100">
-            <div class="form-text">数值越小越先启动</div>
-          </div>
+        <!-- 安装方式（包驱动，P0 修复）：从服务端下载包并走部署管线，
+             参数以包内清单为准；参数覆盖能力随 P1 沟通后回归。 -->
+        <div class="info-banner mb-0">
+          <i class="bi bi-info-circle me-2" style="color:var(--primary)"></i>
+          点击安装后将从服务端下载安装包，经部署管线完成校验、落盘与建档（含依赖解析）。
+          运行参数与环境变量以<b>包内清单为准</b>，安装完成后可在服务详情中调整。
         </div>
-
-        <!-- 预检结果 -->
-        <div class="form-section-divider"><span><i class="bi bi-shield-check me-1"></i>安装预检</span></div>
-        <div id="im-precheck"><div class="text-muted small">点击「预检并安装」后显示检查结果</div></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-light" data-bs-dismiss="modal">取消</button>
-        <button class="btn btn-primary" id="im-confirm" onclick="doInstall()"><i class="bi bi-check-lg me-1"></i>预检并安装</button>
+        <button class="btn btn-primary" id="im-confirm" onclick="doInstall()"><i class="bi bi-check-lg me-1"></i>安装</button>
       </div>
     </div>
   </div>

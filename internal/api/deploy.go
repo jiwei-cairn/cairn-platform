@@ -112,8 +112,9 @@ func (s *Server) runDeployPipeline(ctx context.Context, t *upgradeTask, pkgPath,
 	}
 	defer p.Close()
 	m := p.Manifest
-	// ── 内容签名验证（F4 激活）：无签名放行（过渡态）；带签名必须通过信任列表 ──
-	if err := verifyContentSignature(m); err != nil {
+	// ── 内容签名验证（F4 激活）：无签名放行（过渡态）；带签名必须通过信任列表
+	//（编译内置 + TOFU：列表为空时从 OTA 服务器 /healthz 动态获取公钥）──
+	if err := verifyContentSignatureDB(s.DB, m); err != nil {
 		return err
 	}
 
@@ -439,9 +440,13 @@ func applyManifestPolicies(def *store.Service, m *pack.Manifest) {
 					"path":        filepath.ToSlash(f.Path),
 					"validateCmd": "", "applyMode": "restart", "applyCmd": "", "maxHistory": 10,
 				})
+				logx.Module("deploy").Info("configFile 策略已按包内 config 角色生成", "svc", m.Name, "path", f.Path)
 				break
 			}
 		}
+	} else {
+		logx.Module("deploy").Warn("applyManifestPolicies：包未声明 configFile 且无 config 角色文件",
+			"svc", m.Name, "manifestConfigFile", string(m.ConfigFile), "files", len(m.Files))
 	}
 	if len(m.LogPolicy) > 0 && string(m.LogPolicy) != "null" {
 		def.LogPolicy = datatypesJSON(m.LogPolicy)

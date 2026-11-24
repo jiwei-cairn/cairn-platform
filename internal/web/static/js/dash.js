@@ -248,10 +248,20 @@ function renderDashServices() {
     const rt = s.runtime || {};
     const cpuDanger = (rt.cpuPct || 0) > 80 ? ' style="color:var(--danger)"' : '';
     const memDanger = (rt.memMB || 0) > 512 ? ' style="color:var(--danger)"' : '';
+    /* 告警原因列：只在服务处于异常态时显示（需求：正常时该列为空）。
+       rt.lastError 是持久台账字段——历史上出过错就永远留存，直接展示会让
+       已恢复 running 的服务一直挂着旧告警吓人。此处按当前状态判定：
+       异常态（failed/backoff/degraded/stopped）才取 lastError / abnormal.reason，
+       正常态（running/starting 等）一律显示空（'—'），与后端 abnormalReason
+       同口径。meta 由 rtState(s) 查得，kind 即当前状态的分类。 */
+    const isAbnormal = ['failed', 'backoff', 'degraded', 'stopped'].includes(rtState(s));
+    const abReason = isAbnormal
+      ? (rt.lastError || ((state.dashboard && state.dashboard.abnormal) || []).find(a => a.serviceId === s.id)?.reason || '')
+      : '';
     return '<tr>' +
       '<td class="fw-semibold"><span class="led ' + meta.led + '"></span>' + escapeHtml(svcTitle(s)) + '</td>' +
       '<td><span class="badge ' + meta.badge + '">' + meta.label + '</span></td>' +
-      '<td class="text-muted" style="min-width:200px;">' + escapeHtml(rt.lastError || ((state.dashboard && state.dashboard.abnormal) || []).find(a => a.serviceId === s.id)?.reason || '—') + '</td>' +
+      '<td class="text-muted" style="min-width:200px;">' + escapeHtml(abReason || '—') + '</td>' +
       '<td><code>' + escapeHtml(s.version || '—') + '</code></td>' +
       '<td class="num-cell">' + fmtUptime(rt.uptimeSec) + '</td>' +
       '<td class="num-cell">' + (rt.restartTotal ?? '—') + '</td>' +

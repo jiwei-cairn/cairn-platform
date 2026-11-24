@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -277,11 +276,8 @@ func (s *Server) PutConfigfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 备份（尽力而为：备份失败不阻断保存，只告警——保住用户输入优先）。
-	bak := makeBackup(abs)
-	if bak != "" {
-		s.pruneConfigBackups(abs, parseConfigFile(def.ConfigFile).MaxHistory)
-	}
+	// P1-2 定案：保存不留档（无 .bak）——唯一的备份是 lastgood 快照，
+	// 由服务启动验证通过时固化。改坏了靠「恢复」回最后正常配置。
 
 	// 原子写。
 	if err := writeFileAtomicPath(abs, []byte(req.Content), cur.Mode().Perm()); err != nil {
@@ -289,13 +285,67 @@ func (s *Server) PutConfigfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, _ := os.Stat(abs)
-	logx.Module("api").Info("保存配置文件", "svc", def.Name, "path", rel, "bytes", len(req.Content), "backup", bak)
+	logx.Module("api").Info("保存配置文件", "svc", def.Name, "path", rel, "bytes", len(req.Content))
 	s.logEvent("info", "settings", def.ID, def.Name,
 		fmt.Sprintf("配置文件已保存：%s（%d 字节）", rel, len(req.Content)))
 
 	ok(w, map[string]any{
 		"path": rel, "sizeBytes": st.Size(),
-		"modifiedAt": st.ModTime().UnixMilli(), "backup": bak,
+		"modifiedAt": st.ModTime().UnixMilli(),
+	})
+}
+
+// RestoreConfigfile POST /api/services/{id}/configfile/restore：
+// 恢复最后正常配置（P1-2 定案：一键回到 lastgood 快照）。
+//
+// 语义 = 「保存 + 生效」：快照内容写回配置文件 → 重启服务。
+// 恢复不额外留档（lastgood 本身就是权威副本，恢复动作不产生新备份）。
+// 快照不存在（服务从未成功启动过）→ 409 说明情况。
+func (s *Server) RestoreConfigfile(w http.ResponseWriter, r *http.Request) {
+	def, okDef := s.loadServiceForConfig(w, r)
+	if !okDef {
+		return
+	}
+	abs, rel, _, err := s.locateConfigFile(def)
+	if err != nil {
+		fail(w, http.StatusConflict, err.Error())
+		return
+	}
+	snap := lastgoodPath(abs)
+	raw, err := os.ReadFile(snap)
+	if err != nil {
+		fail(w, http.StatusConflict,
+			"没有可恢复的快照（服务从未成功启动过，或配置未随包提供）")
+		return
+	}
+	cur, err := os.Stat(abs)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := writeFileAtomicPath(abs, raw, cur.Mode().Perm()); err != nil {
+		fail(w, http.StatusInternalServerError, "恢复失败: "+err.Error())
+		return
+	}
+	st, _ := os.Stat(abs)
+	logx.Module("api").Info("恢复最后正常配置", "svc", def.Name, "path", rel, "bytes", len(raw))
+	s.logEvent("info", "settings", def.ID, def.Name,
+		fmt.Sprintf("配置已恢复为最后正常版本：%s（%d 字节）", rel, len(raw)))
+
+	// 生效：与「保存」同语义——写完即重启（配置在进程启动时读取）。
+	if s.Supervisor == nil {
+		ok(w, map[string]any{"restored": true, "restarted": false, "note": "已写回配置；监管引擎未装配，未重启"})
+		return
+	}
+	if !s.Supervisor.Restart(def.ID) {
+		fail(w, http.StatusServiceUnavailable,
+			"配置已恢复，但重启未被受理（引擎忙），请在服务卡片手动重启")
+		return
+	}
+	ok(w, map[string]any{
+		"restored": true, "restarted": true,
+		"path": rel, "sizeBytes": st.Size(),
+		"modifiedAt": st.ModTime().UnixMilli(),
 	})
 }
 
@@ -354,36 +404,88 @@ func (s *Server) ApplyConfigfile(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// backupEntry 一条备份记录（历史列表用）。
-type backupEntry struct {
-	Name  string `json:"name"`
-	At    int64  `json:"at"`
-	Bytes int64  `json:"bytes"`
+// lastgoodView 一份快照的展示信息（前端「最后正常配置」区展示唯一一份）。
+type lastgoodView struct {
+	Exists bool  `json:"exists"`
+	At     int64 `json:"at"` // 快照时刻（毫秒）
+	Bytes  int64 `json:"bytes"`
 }
 
-// ConfigfileHistory GET /api/services/{id}/configfile/history：版本历史（备份列表）。
+// ConfigfileHistory GET /api/services/{id}/configfile/history：
+// 最后正常配置快照信息（P1-2 定案：单份 lastgood，取代 N 份 .bak 历史）。
 func (s *Server) ConfigfileHistory(w http.ResponseWriter, r *http.Request) {
 	def, okDef := s.loadServiceForConfig(w, r)
 	if !okDef {
 		return
 	}
-	abs, rel, _, err := s.locateConfigFile(def)
-	if err != nil {
-		// 历史不需要文件存在（可能刚被删）：按配置路径推断目录。
-		cfg := parseConfigFile(def.ConfigFile)
-		if strings.TrimSpace(cfg.Path) == "" {
-			ok(w, []backupEntry{})
-			return
+	abs, _, _, err := s.locateConfigFile(def)
+	view := lastgoodView{}
+	if err == nil {
+		if st, statErr := os.Stat(lastgoodPath(abs)); statErr == nil && st.Mode().IsRegular() {
+			view.Exists = true
+			view.At = st.ModTime().UnixMilli()
+			view.Bytes = st.Size()
 		}
-		abs = filepath.Join(s.installRoot(), def.Name, filepath.FromSlash(cfg.Path))
-		rel = cfg.Path
 	}
-	_ = rel
-	entries := listConfigBackups(abs)
-	ok(w, entries)
+	ok(w, view)
 }
 
-/* ══════════════ 内部工具 ══════════════ */
+/* ══════════════ lastgood 快照（P1-2 定案：单份快照 + 一键恢复） ══════════════
+ *
+ * 业务闭环（需求定稿）：
+ *   - 快照时机：服务启动验证通过（starting→running 迁移）——此刻的配置
+ *     被 L2 验证证明"能跑"，固化为唯一备份 {file}.lastgood；
+ *   - 保存：用户自由修改→保存→重启；起不来就继续改（无限次重试）；
+ *   - 恢复：一直改不好时点「恢复」→ 快照写回 → 重启 → 恢复运行；
+ *   - 不保留 N 份历史（.bak.{unix}/maxHistory 已裁撤），保存动作本身不留档。
+ */
+
+// lastgoodSuffix 快照文件后缀（服务根目录内，与配置文件同目录）。
+const lastgoodSuffix = ".lastgood"
+
+// lastgoodPath 快照路径：{配置文件}.lastgood。
+func lastgoodPath(configFile string) string {
+	return configFile + lastgoodSuffix
+}
+
+// SnapshotLastgood 固化快照：把当前配置文件复制为 {file}.lastgood。
+//
+// 由 Engine.OnRunning 钩子调用（服务 starting→running 迁移时）——api 层
+// 订阅监管事件，supervisor 不懂配置文件（依赖方向：本函数属于 api 层）。
+//
+// 幂等：每次启动成功都会覆盖（快照永远对齐"最后一次正常启动"）。
+// 尽力而为：快照失败只告警，绝不影响状态迁移（监管主流程优先）。
+func (s *Server) SnapshotLastgood(serviceID int, name string) {
+	if serviceID <= 0 || strings.TrimSpace(name) == "" {
+		logx.Module("api").Warn("快照钩子参数无效", "svc", name, "id", serviceID)
+		return
+	}
+	var def store.Service
+	if err := s.DB.First(&def, "id = ?", serviceID).Error; err != nil {
+		logx.Module("api").Warn("快照钩子：服务定义查询失败", "svc", name, "err", err)
+		return
+	}
+	abs, _, _, err := s.locateConfigFile(&def)
+	if err != nil {
+		logx.Module("api").Warn("快照钩子：配置文件定位失败", "svc", name, "err", err)
+		return
+	}
+	raw, err := os.ReadFile(abs)
+	if err != nil {
+		logx.Module("api").Warn("lastgood 快照读取失败", "svc", name, "err", err)
+		return
+	}
+	st, err := os.Stat(abs)
+	if err != nil {
+		return
+	}
+	dst := lastgoodPath(abs)
+	if err := writeFileAtomicPath(dst, raw, st.Mode().Perm()); err != nil {
+		logx.Module("api").Warn("lastgood 快照写入失败", "svc", name, "err", err)
+		return
+	}
+	logx.Module("api").Info("已固化最后正常配置快照", "svc", name, "bytes", len(raw))
+}
 
 // isTextContent 判定内容是否可按文本编辑（NUL 字节或高比例控制字符视为二进制）。
 func isTextContent(raw []byte) bool {
@@ -404,68 +506,6 @@ func isTextContent(raw []byte) bool {
 		}
 	}
 	return float64(ctrl)/float64(len(sample)) < 0.05
-}
-
-// makeBackup 备份为 {file}.bak.{unix}，返回备份路径（失败返回空串，不阻断保存）。
-func makeBackup(path string) string {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	st, err := os.Stat(path)
-	if err != nil {
-		return ""
-	}
-	bak := fmt.Sprintf("%s.bak.%d", path, time.Now().Unix())
-	if err := os.WriteFile(bak, raw, st.Mode().Perm()); err != nil {
-		logx.Module("api").Warn("配置文件备份失败", "path", path, "err", err)
-		return ""
-	}
-	return bak
-}
-
-// listConfigBackups 列出 {file}.bak.{unix} 备份（按时间倒序）。
-func listConfigBackups(path string) []backupEntry {
-	dir := filepath.Dir(path)
-	prefix := filepath.Base(path) + ".bak."
-	ents, err := os.ReadDir(dir)
-	if err != nil {
-		return []backupEntry{}
-	}
-	out := make([]backupEntry, 0, len(ents))
-	for _, e := range ents {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
-			continue
-		}
-		suffix := strings.TrimPrefix(e.Name(), prefix)
-		unix, err := strconv.ParseInt(suffix, 10, 64)
-		if err != nil {
-			continue
-		}
-		info, iErr := e.Info()
-		var size int64
-		if iErr == nil {
-			size = info.Size()
-		}
-		out = append(out, backupEntry{Name: e.Name(), At: unix * 1000, Bytes: size})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].At > out[j].At })
-	return out
-}
-
-// pruneConfigBackups 按 maxHistory 保留最近 N 份备份。
-func (s *Server) pruneConfigBackups(path string, maxHistory int) {
-	if maxHistory <= 0 {
-		return
-	}
-	entries := listConfigBackups(path)
-	if len(entries) <= maxHistory {
-		return
-	}
-	dir := filepath.Dir(path)
-	for _, e := range entries[maxHistory:] {
-		_ = os.Remove(filepath.Join(dir, e.Name))
-	}
 }
 
 // writeFileAtomicPath 原子写（.tmp + rename），保留原文件权限。

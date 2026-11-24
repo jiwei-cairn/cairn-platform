@@ -136,25 +136,52 @@ async function cfSave() {
   } finally { btnIdle(btn); }
 }
 
-/* ── 版本历史（备份列表） ── */
+/* ── 最后正常配置快照（P1-2 定案：单份 lastgood + 一键恢复） ──
+ * GET history 返回 {exists, at, bytes}；恢复走 POST restore
+ *（快照写回 + 重启，与「保存」同语义）。 */
 async function loadConfigfileHistory(svcId) {
   const tb = el('cf-history-tbody');
   if (!tb) return;
   try {
-    const rows = await apiGet('/services/' + svcId + '/configfile/history') || [];
-    if (!rows.length) {
-      tb.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">暂无备份（每次保存自动生成一份）</td></tr>';
+    const d = await apiGet('/services/' + svcId + '/configfile/history') || {};
+    if (!d.exists) {
+      tb.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">暂无快照（服务启动验证通过后自动留存）</td></tr>';
       return;
     }
-    tb.innerHTML = rows.map(r => (
+    tb.innerHTML =
       '<tr>' +
-        '<td class="text-nowrap">' + fmtDateTime(r.at) + '</td>' +
-        '<td class="text-muted">保存前快照</td>' +
-        '<td class="num-cell">' + fmtBytes(r.bytes) + '</td>' +
-        '<td class="text-end"><button class="btn btn-outline-secondary btn-sm" disabled title="备份内容查看随 M3 历史功能提供">查看</button></td>' +
-      '</tr>'
-    )).join('');
+        '<td class="text-nowrap">' + fmtDateTime(d.at) + '</td>' +
+        '<td class="num-cell">' + fmtBytes(d.bytes) + '</td>' +
+        '<td class="text-end"><button class="btn btn-outline-primary btn-sm" onclick="cfRestore()"><i class="bi bi-arrow-counterclockwise me-1"></i>恢复</button></td>' +
+      '</tr>';
   } catch (e) {
-    tb.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">历史加载失败：' + escapeHtml(e.message) + '</td></tr>';
+    tb.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">快照信息加载失败：' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+/* cfRestore 恢复最后正常配置：确认 → 快照写回 → 重启 → 关闭弹窗刷新卡片。
+ * 业务闭环的兜底：用户改配置一直改不好时，一键回到上次能跑的版本。 */
+async function cfRestore() {
+  if (!cfCtx) return;
+  const go = await confirmDialog({
+    title: '恢复最后正常配置？',
+    html: '当前配置文件内容将被<b>最后正常启动时的快照</b>覆盖，随后服务自动重启。' +
+      '<div class="mt-1 text-muted">仅建议在修改后服务无法启动、且多次调整无果时使用。</div>',
+    level: 'L2', confirmText: '恢复并重启',
+  });
+  if (!go) return;
+  const btn = el('cf-save');
+  btnBusy(btn, '恢复中…');
+  try {
+    await apiPost('/services/' + cfCtx.svcId + '/configfile/restore', {});
+    showToast('success', '已恢复最后正常配置，服务正在重启');
+    cfConfirmedClose = true;
+    cfModal.hide();
+    await loadServices(true);
+    renderServiceCards();
+    if (currentSection === 'dash') refreshDashboard();
+  } catch (e) {
+    showToast('danger', '恢复失败：' + e.message);
+    btnIdle(btn);
   }
 }
