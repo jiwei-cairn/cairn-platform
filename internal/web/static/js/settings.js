@@ -31,6 +31,7 @@ const SET_FIELD_LABEL = {
 function settingsEnter() {
   startSettingsClock();
   loadSettingsPage();
+  loadSuiteServices(); // P1-3：产品套件发布卡片的服务勾选列表
 }
 function settingsLeave() {
   if (settingsClockTimer) { clearInterval(settingsClockTimer); settingsClockTimer = null; }

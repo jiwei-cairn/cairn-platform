@@ -97,6 +97,9 @@ func Router(s *api.Server) http.Handler {
 		r.Get("/market/catalog", s.MarketCatalog)
 		r.Get("/market/products", s.MarketProducts)
 
+		// 产品套件发布（P1-3：从已装服务编排 .cairnproduct 并上传 hub）。
+		r.Post("/publish/suite", s.SuitePublish)
+
 		// 平台配置。
 		r.Get("/settings", s.GetSettings)
 		r.Post("/settings", s.SaveSettings)

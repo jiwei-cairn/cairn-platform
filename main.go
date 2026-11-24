@@ -73,6 +73,7 @@ func main() {
 	server.RuntimeName = "fork"
 	server.Supervisor = adapt.SupervisorAdapter{Eng: eng}
 	server.Defs = adapt.DefsHook{Eng: eng}
+	server.Stats = adapt.StatsAdapter{Eng: eng} // P1-1：详情页运行统计接通
 	server.Host = hostmetrics.HostMetrics{}
 	// 磁盘探针锚定到数据根实际所在的卷：生产 exec-dir / --root 形态下 CWD
 	// 可能是 System32 等无关位置，按 CWD 相对路径取卷会读错盘。

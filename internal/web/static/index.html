@@ -297,6 +297,44 @@
             </div>
           </div>
 
+          <!-- ═══════════ 产品套件发布（P1-3：勾选已装服务 → 合成 .cairnproduct → 上传 hub） ═══════════ -->
+          <div class="settings-card" id="suite-card">
+            <div class="settings-card-head"><i class="bi bi-box-seam"></i>
+              <div><div class="settings-card-title">产品套件发布</div><div class="settings-card-sub">从已装服务编排套件，合成 .cairnproduct 上传服务端（市场可见）</div></div>
+            </div>
+            <div class="row g-2">
+              <div class="col-6 settings-field">
+                <label for="sp-name">套件名 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="sp-name" placeholder="smart-energy">
+                <div class="invalid-feedback">小写字母/数字/._-，最长 64</div>
+              </div>
+              <div class="col-3 settings-field">
+                <label for="sp-version">版本 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="sp-version" placeholder="1.0.0">
+                <div class="invalid-feedback">语义化版本（如 1.0.0）</div>
+              </div>
+              <div class="col-3 settings-field">
+                <label for="sp-display">展示名</label>
+                <input type="text" class="form-control" id="sp-display" placeholder="能源套件">
+              </div>
+            </div>
+            <div class="settings-field">
+              <label for="sp-desc">描述</label>
+              <input type="text" class="form-control" id="sp-desc" placeholder="面向场景的说明">
+            </div>
+            <div class="settings-field">
+              <label>勾选套件包含的服务（至少 2 个；版本取各服务当前版本）</label>
+              <div id="sp-services" class="d-flex flex-column gap-1" style="max-height:160px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:8px;">
+                <div class="text-muted small">加载中…</div>
+              </div>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-2">
+              <button class="btn btn-primary btn-sm" id="sp-publish" onclick="suitePublish()"><i class="bi bi-cloud-upload me-1"></i>发布套件</button>
+              <span class="small text-muted" id="sp-status"></span>
+            </div>
+            <div id="sp-result"></div>
+          </div>
+
           <div class="settings-card">
             <div class="settings-card-head"><i class="bi bi-globe"></i>
               <div><div class="settings-card-title">Web 服务</div><div class="settings-card-sub">本管理页监听参数</div></div>
@@ -738,6 +776,7 @@
 <script src="js/log.js"></script>
 <script src="js/update.js"></script>
 <script src="js/settings.js"></script>
+<script src="js/suite.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

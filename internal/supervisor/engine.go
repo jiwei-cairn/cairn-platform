@@ -32,6 +32,10 @@ type Engine struct {
 	// 依赖方向：supervisor 不懂配置文件——钩子由 adapt 装配注入。
 	// 可为 nil（测试形态）；回调 panic 或阻塞不影响状态迁移（异步调用）。
 	OnRunning func(serviceID int, name string)
+
+	// stats 进程指标环形缓冲注册表（P1-1：详情页 sparkline 数据源）。
+	// worker 采集差分时写入，api.StatsSource 经 Engine.StatsSeries 读取。
+	stats *statsRegistry
 }
 
 // NewEngine 构造引擎（不启动；Init 完成装配与拉起）。
@@ -42,7 +46,26 @@ func NewEngine(rt runtime.Runtime, db *gorm.DB) *Engine {
 		workers: make(map[int]*worker),
 		defs:    make(map[int]store.Service),
 		graph:   BuildGraph(nil),
+		stats:   newStatsRegistry(),
 	}
+}
+
+// StatsSeries 返回服务的 CPU/内存采样序列（P1-1：api.StatsSource 消费）。
+// 服务无数据（从未 running）返回 nil。
+func (e *Engine) StatsSeries(serviceID int) (cpu, mem []int, ok bool) {
+	e.mu.Lock()
+	r, has := e.stats.rings[serviceID]
+	e.mu.Unlock()
+	if !has {
+		return nil, nil, false
+	}
+	cpu, mem = r.cpuSeries(), r.memSeries()
+	return cpu, mem, len(cpu) > 0
+}
+
+// StatsDrop 服务移除时清缓冲（防泄漏；由 RemoveUnit 路径调用）。
+func (e *Engine) StatsDrop(serviceID int) {
+	e.stats.drop(serviceID)
 }
 
 // notifyRunning 触发 OnRunning 钩子（异步，不阻塞迁移路径）。
@@ -240,6 +263,7 @@ func (e *Engine) Apply(services []store.Service) {
 		}
 		w.send(workerCmd{kind: cmdDispose})
 		_ = e.rt.RemoveUnit(unitKey(w.id))
+		e.StatsDrop(w.id) // P1-1：清指标缓冲防泄漏
 		e.event("info", "stop", w.id, w.defName(), "服务已删除，移除监管")
 	}
 	for _, w := range added {

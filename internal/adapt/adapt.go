@@ -40,7 +40,7 @@ func RunStateFrom(s supervisor.Snap) api.RunState {
 		State: s.State, Pid: s.Pid, UptimeSec: s.UptimeSec,
 		RestartTotal: s.RestartTotal, RestartFailures: s.RestartFailures,
 		ConsecutiveFailures: s.ConsecutiveFailures,
-		HealthState: s.HealthState, LastError: s.LastError,
+		HealthState:         s.HealthState, LastError: s.LastError,
 		CpuPct: s.CpuPct, MemMB: s.MemMB,
 		CpuTimeSec: s.CpuTimeSec, NetRxKB: s.NetRxKB, NetTxKB: s.NetTxKB,
 	}
@@ -51,5 +51,32 @@ type DefsHook struct {
 	Eng *supervisor.Engine
 }
 
-func (h DefsHook) OnDefsSaved(store.Service)  { go h.Eng.SyncFromDB() }
-func (h DefsHook) OnDefsDeleted(int, string)  { go h.Eng.SyncFromDB() }
+func (h DefsHook) OnDefsSaved(store.Service) { go h.Eng.SyncFromDB() }
+func (h DefsHook) OnDefsDeleted(int, string) { go h.Eng.SyncFromDB() }
+
+// StatsAdapter supervisor.Engine → api.StatsSource。
+// 标量字段（uptime/restartTotal/cpuTime/net）取自运行态快照，
+// 曲线（cpu/mem 序列）取自 Engine 的 statsRing（P1-1）。
+type StatsAdapter struct {
+	Eng *supervisor.Engine
+}
+
+func (a StatsAdapter) Series(serviceID int) (api.StatsView, bool) {
+	rt, ok := a.Eng.Snapshot(serviceID)
+	if !ok {
+		return api.StatsView{}, false
+	}
+	cpu, mem, hasRing := a.Eng.StatsSeries(serviceID)
+	if !hasRing {
+		cpu, mem = []int{}, []int{}
+	}
+	return api.StatsView{
+		UptimeSec:    rt.UptimeSec,
+		RestartTotal: rt.RestartTotal,
+		CpuTimeSec:   rt.CpuTimeSec,
+		NetRxKB:      rt.NetRxKB,
+		NetTxKB:      rt.NetTxKB,
+		Cpu:          cpu,
+		Mem:          mem,
+	}, true
+}

@@ -474,6 +474,8 @@ func (w *worker) reconcile() {
 			// 避免「基线归零 → 下一拍差分成假满负载」。
 			w.curCpuPct, w.curCpuTimeSec, w.curMemMB = cpuPct, cpuTime, memMB
 			w.lastCpuTime, w.lastCpuAt = cpuTime, now
+			// P1-1：同拍写入环形缓冲（详情页 sparkline 数据源，零新增开销）。
+			w.eng.stats.ring(w.id).push(samplePoint{CpuPct: cpuPct, MemMB: memMB})
 		}
 	}
 	w.mu.Unlock()
