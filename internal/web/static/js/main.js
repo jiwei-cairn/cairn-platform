@@ -1,7 +1,6 @@
 /* ══════════════════════════════════════════════
    main：Modal 装配 + init（永远最后加载）
-   init：loadVersion → settings 后台预取 → loadServices
-        → 恢复未完成升级任务 → switchSection('dash')
+   init：loadVersion → settings 后台预取 → loadServices → switchSection('dash')
    ══════════════════════════════════════════════ */
 
 let svcModal, cfModal, leModal, umModal, usModal, installModal, confirmModal;
@@ -32,13 +31,7 @@ function initModals() {
 
 function renderVersionBadge() {
   const v = state.version || {};
-  setText('sidebar-version', '版本 ' + (v.version || '—') + (v.mock ? ' · 演示模式' : ''));
-}
-
-/* 恢复未完成的升级任务：依赖后端任务查询（/upgrade/tasks 属 M2）。
-   此处仅在升级任务接口可用后接线，当前不做任何动作。 */
-function restoreUpgradeTask() {
-  /* 占位：M2 升级管线落地后由 taskSnapshot 恢复。 */
+  setText('sidebar-version', '版本 ' + (v.version || '—'));
 }
 
 function onVisibilityChange() {
@@ -66,7 +59,6 @@ async function init() {
   renderServiceCards();
   renderDashLoading();
   await loadServices();
-  restoreUpgradeTask();
   switchSection('dash');
 
   

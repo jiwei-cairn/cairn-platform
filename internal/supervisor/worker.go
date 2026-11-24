@@ -1,4 +1,4 @@
-// worker.go — 单服务监管循环：进程事实 + L2 探针 → 九态监管语义（架构 §3.2 全表）。
+// worker.go — 单服务监管循环：进程事实 + L2 探针 → 八态监管语义。
 //
 // 事件驱动：亲管进程退出经 runtime.ExitWatcher 即时到达（cmdExit）；认领进程
 // 由 runtime 探活协程发同一事件（Adopted=true）。对账 tick（2s）兜底状态机
@@ -48,8 +48,6 @@ type Snap struct {
 	CpuPct              float64 // CPU 占用率（两次采样差分）
 	MemMB               float64 // RSS 内存（MB）
 	CpuTimeSec          float64 // 累计 CPU 时间
-	NetRxKB             float64 // 累计接收（KB，留 M3）
-	NetTxKB             float64 // 累计发送（KB，留 M3）
 }
 
 const (
@@ -204,7 +202,7 @@ func (w *worker) doStart(resetFuse bool) {
 		w.row.ConsecutiveFailures = 0
 	}
 	active := w.st == StateRunning || w.st == StateDegraded || w.st == StateStarting ||
-		w.st == StateStopping || w.st == StateUpgrading
+		w.st == StateStopping
 	w.mu.Unlock()
 	if active {
 		return

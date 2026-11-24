@@ -19,44 +19,29 @@ import (
 	"gorm.io/gorm"
 )
 
-// versionView 是 retainedVersions 数组元素（覆盖式升级下恒为一条：当前版本，
-// 保留数组形状以兼容前端消费）。
-type versionView struct {
-	Version     string `json:"version"`
-	Active      bool   `json:"active"`
-	InstalledAt int64  `json:"installedAt"`
-}
-
-// serviceRow 是 GET /api/services|/api/dashboard 的聚合行：
-// “服务定义 + 运行态”一次拿全，前端列表不用两跳拼装（架构 §2.1 增改 6）。
+// serviceRow 是 GET /api/services 与 GET /api/dashboard 的聚合行：
+// 定义和运行态一次返回。
 type serviceRow struct {
-	ID               int               `json:"id"`
-	Name             string            `json:"name"`
-	Summary          string            `json:"summary"`
-	ServiceType      string            `json:"serviceType"`
-	WebUrl           string            `json:"webUrl"`
-	ExePath          string            `json:"exePath"`
-	Args             []string          `json:"args"`
-	WorkDir          string            `json:"workDir"`
-	Env              map[string]string `json:"env"`
-	Enabled          bool              `json:"enabled"`
-	AutoStart        bool              `json:"autoStart"`
-	Priority         int               `json:"priority"`
-	DependsOn        []int             `json:"dependsOn"`
-	DependsOnNames   []string          `json:"dependsOnNames"`
-	RestartPolicy    json.RawMessage   `json:"restartPolicy"`
-	HealthCheck      json.RawMessage   `json:"healthCheck"`
-	ConfigFile       json.RawMessage   `json:"configFile"`
-	LogPolicy        json.RawMessage   `json:"logPolicy"`
-	Version          string            `json:"version"`
-	InstallSource    string            `json:"installSource"`
-	RetainedVersions []versionView     `json:"retainedVersions"`
-	Runtime          RunState          `json:"runtime"`
-}
-
-// manifestView ServiceVersion.manifest 的取用子集。
-type manifestView struct {
-	Source string `json:"source"`
+	ID             int               `json:"id"`
+	Name           string            `json:"name"`
+	Summary        string            `json:"summary"`
+	ServiceType    string            `json:"serviceType"`
+	WebUrl         string            `json:"webUrl"`
+	ExePath        string            `json:"exePath"`
+	Args           []string          `json:"args"`
+	WorkDir        string            `json:"workDir"`
+	Env            map[string]string `json:"env"`
+	Enabled        bool              `json:"enabled"`
+	AutoStart      bool              `json:"autoStart"`
+	Priority       int               `json:"priority"`
+	DependsOn      []int             `json:"dependsOn"`
+	DependsOnNames []string          `json:"dependsOnNames"`
+	RestartPolicy  json.RawMessage   `json:"restartPolicy"`
+	HealthCheck    json.RawMessage   `json:"healthCheck"`
+	ConfigFile     json.RawMessage   `json:"configFile"`
+	LogPolicy      json.RawMessage   `json:"logPolicy"`
+	Version        string            `json:"version"`
+	Runtime        RunState          `json:"runtime"`
 }
 
 func (s *Server) serviceRows() []serviceRow {
@@ -107,17 +92,7 @@ func buildServiceRow(d store.Service, states map[int]RunState, names map[int]str
 	row.ConfigFile = json.RawMessage(d.ConfigFile)
 	row.LogPolicy = json.RawMessage(d.LogPolicy)
 
-	// 覆盖式升级（decisions.md D5）：只有当前版本一条记录。
 	row.Version = d.Version
-	if d.Version != "" {
-		var m manifestView
-		if json.Unmarshal(d.Manifest, &m) == nil {
-			row.InstallSource = m.Source
-		}
-		row.RetainedVersions = append(row.RetainedVersions, versionView{
-			Version: d.Version, Active: true, InstalledAt: d.InstalledAt.UnixMilli(),
-		})
-	}
 
 	if states != nil {
 		if rt, ok := states[d.ID]; ok {
@@ -125,7 +100,7 @@ func buildServiceRow(d store.Service, states map[int]RunState, names map[int]str
 		}
 	}
 	if !d.Enabled {
-		// 展示态与运行态分离：停用是定义层事实（mockServiceRow 同语义）。
+		// 停用是定义层事实，覆盖监管态供列表展示。
 		row.Runtime.State = "disabled"
 		row.Runtime.UptimeSec = 0
 	}
@@ -170,8 +145,51 @@ func mustJSON(v any) datatypesJSON {
 func defaultPolicyBlobs() (restart, health, cfg, logp datatypesJSON) {
 	return mustJSON(map[string]any{"mode": "backoff", "maxRetries": 0, "windowSec": 0, "backoffBase": 2, "backoffMax": 60}),
 		mustJSON(map[string]any{"type": "none", "target": "", "intervalSec": 10, "timeoutSec": 3, "readyHoldSec": 5, "failuresThreshold": 3, "degradedRestartSec": 30}),
-		mustJSON(map[string]any{"path": "", "validateCmd": "", "applyMode": "restart", "applyCmd": "", "maxHistory": 10}),
+		configFileBlob(""),
 		mustJSON(map[string]any{"maxSizeMB": 10, "maxBackups": 3})
+}
+
+// configFileBlob 配置策略的统一形状。path 是相对服务根的包内路径，可为空。
+func configFileBlob(path string) datatypesJSON {
+	return mustJSON(map[string]any{
+		"path": path, "validateCmd": "", "applyMode": "restart", "applyCmd": "",
+	})
+}
+
+// acceptRestartPolicy 只接受当前两种模式。存量库里的 always/onFailure
+// 由 supervisor.ParsePolicy 在读取时折成 backoff，这里拒绝新写入。
+func acceptRestartPolicy(raw []byte) error {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var rp struct {
+		Mode string `json:"mode"`
+	}
+	if json.Unmarshal(raw, &rp) != nil || rp.Mode == "" {
+		return nil
+	}
+	if rp.Mode != "periodic" && rp.Mode != "backoff" {
+		return fmt.Errorf("restartPolicy.mode 只支持 periodic / backoff")
+	}
+	return nil
+}
+
+// coerceRestartPolicy 把包内旧模式改写成 backoff，避免新安装再写入废弃值。
+func coerceRestartPolicy(raw []byte) []byte {
+	var rp map[string]any
+	if json.Unmarshal(raw, &rp) != nil {
+		return raw
+	}
+	mode, _ := rp["mode"].(string)
+	if mode != "always" && mode != "onFailure" {
+		return raw
+	}
+	rp["mode"] = "backoff"
+	b, err := json.Marshal(rp)
+	if err != nil {
+		return raw
+	}
+	return b
 }
 
 // SaveService 创建或更新服务定义。
@@ -212,17 +230,9 @@ func (s *Server) SaveService(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "webUrl 必须是 http:// 或 https:// 开头")
 		return
 	}
-	// 重启策略模式收窄为 always|onFailure（架构 §2.2：limited 拆为配额两维）。
-	if len(p.RestartPolicy) > 0 {
-		var rp struct {
-			Mode string `json:"mode"`
-		}
-		if json.Unmarshal(p.RestartPolicy, &rp) == nil {
-			if rp.Mode != "" && rp.Mode != "periodic" && rp.Mode != "backoff" && rp.Mode != "always" && rp.Mode != "onFailure" {
-				fail(w, http.StatusBadRequest, "restartPolicy.mode 只支持 periodic / backoff")
-				return
-			}
-		}
+	if err := acceptRestartPolicy(p.RestartPolicy); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	// 名称唯一性。
 	var conflict store.Service
@@ -372,27 +382,25 @@ func (s *Server) DeleteService(w http.ResponseWriter, r *http.Request) {
 	if s.Defs != nil {
 		s.Defs.OnDefsDeleted(id, def.Name)
 	}
-	// 清理磁盘产物与关联读模型：前端卸载确认明确承诺"本地保留版本将被移除"，
-	// 原先只删 Service 行，services/{os}/{arch}/{name}/ 与台账/运行态/指标全残留，
-	// 重装同名服务后新旧版本目录混住。
+	// 清理磁盘产物与关联读模型。只删 Service 行会留下安装目录。
 	s.purgeServiceArtifacts(id, def.Name)
 	logx.Module("api").Info("删除服务定义", "id", id, "name", def.Name)
 	ok(w, map[string]any{"id": id})
 }
 
-// purgeServiceArtifacts 卸载后的清理：版本目录、版本台账、运行态、指标点。
+// purgeServiceArtifacts 卸载后的清理：安装目录、运行态、事件以外的关联行。
 // 全部尽力而为（失败仅告警），不阻断卸载响应。
 func (s *Server) purgeServiceArtifacts(id int, name string) {
-	// 1) 版本目录（services/{os}/{arch}/{name}），不触碰 services 根。
+	// 1) 安装目录 services/{os}/{arch}/{name}，不触碰 services 根。
 	if name != "" {
 		root := s.installRoot()
 		svcDir := filepath.Join(root, name)
 		// 双重防御（第二层）：SaveService 已用 manifestNameRE 校验 name，此处仍
 		// 断言不越界——历史脏数据 / 直接改库时，name 含 ".." 或绝对路径即拒绝删除。
 		if !pathWithin(root, svcDir) {
-			logx.Module("api").Warn("服务名越界，跳过版本目录清理", "svc", name, "dir", svcDir)
+			logx.Module("api").Warn("服务名越界，跳过安装目录清理", "svc", name, "dir", svcDir)
 		} else if err := os.RemoveAll(svcDir); err != nil {
-			logx.Module("api").Warn("删除版本目录失败", "svc", name, "dir", svcDir, "err", err)
+			logx.Module("api").Warn("删除安装目录失败", "svc", name, "dir", svcDir, "err", err)
 		}
 	}
 	// 2) 关联表行。
@@ -460,7 +468,7 @@ func (s *Server) StopService(w http.ResponseWriter, r *http.Request) { s.service
 // RestartService 手动重启。
 func (s *Server) RestartService(w http.ResponseWriter, r *http.Request) { s.serviceOp(w, r, "restart") }
 
-// ServiceStats 单服务统计曲线（B 类 fake：demo 引擎产出平滑随机游走序列）。
+// ServiceStats 返回单服务运行时长、重启次数和 CPU/内存曲线。
 func (s *Server) ServiceStats(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
@@ -474,7 +482,7 @@ func (s *Server) ServiceStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Stats == nil {
-		notImplemented(w, "统计采集（M3）")
+		fail(w, http.StatusServiceUnavailable, "统计源未装配")
 		return
 	}
 	view, found := s.Stats.Series(id)
@@ -482,6 +490,34 @@ func (s *Server) ServiceStats(w http.ResponseWriter, r *http.Request) {
 		view.UptimeSec = 0
 	}
 	ok(w, view)
+}
+
+// resolveDeps 把依赖服务名解析成 id，并做环检测。
+// selfID 为 0 表示尚未落库的新服务；升级时传入已有服务 id，用新依赖替换该节点的边。
+// 找不到的名字跳过（与安装预检的「依赖尚未安装」提示分工：这里不阻断）。
+func (s *Server) resolveDeps(names []string, selfID int) ([]int, error) {
+	deps := make([]int, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		var d store.Service
+		if s.DB.First(&d, "name = ?", name).Error == nil {
+			deps = append(deps, d.ID)
+		}
+	}
+	if len(deps) == 0 {
+		return deps, nil
+	}
+	var all []store.Service
+	if err := s.DB.Order("id asc").Find(&all).Error; err != nil {
+		return nil, err
+	}
+	if cycle := detectDependsCycle(all, selfID, deps); cycle != "" {
+		return nil, fmt.Errorf("依赖形成环：%s", cycle)
+	}
+	return deps, nil
 }
 
 // detectDependsCycle 在全部定义上套用“目标服务的最新 dependsOn”后做 DFS

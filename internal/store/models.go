@@ -17,21 +17,21 @@ import (
 // 覆盖式升级（decisions.md D5）：无多版本目录，Version 记录当前版本，
 // Manifest 留存当前版本的安装清单快照（导出与排障用）。
 type Service struct {
-	ID          int    `gorm:"primaryKey" json:"id"`
-	Name        string `gorm:"uniqueIndex;not null" json:"name"` // 同时是安装目录名
-	Version     string `gorm:"not null;default:''" json:"version"` // 当前版本（语义化）
-	Manifest    datatypes.JSON `json:"manifest"`                    // 当前版本安装清单快照
-	InstalledAt time.Time      `json:"-"`
-	Summary     string         `gorm:"not null;default:''" json:"summary"` // 卡片展示名（中文摘要）：空则回落到 Name
-	ServiceType string         `json:"serviceType"` // native | opensource（纯标注）
-	WebUrl      string         `json:"webUrl"`      // 独立 Web 控制台地址（空 = 名称不可穿越）
-	ExePath     string         `json:"exePath"`     // services/{os}/{arch}/{name}/{entrypoint}
-	Args        datatypes.JSON `json:"args"`
-	WorkDir     string         `json:"workDir"` // 固定 data/{name}（数据与产物分离）
-	Env         datatypes.JSON `json:"env"`
-	AutoStart   bool           `json:"autoStart"`
-	Priority    int            `json:"priority"`
-	DependsOn   datatypes.JSON `json:"dependsOn"` // 服务 id 数组（存 id 不存 name，防改名破坏引用）
+	ID            int            `gorm:"primaryKey" json:"id"`
+	Name          string         `gorm:"uniqueIndex;not null" json:"name"`   // 同时是安装目录名
+	Version       string         `gorm:"not null;default:''" json:"version"` // 当前版本（语义化）
+	Manifest      datatypes.JSON `json:"manifest"`                           // 当前版本安装清单快照
+	InstalledAt   time.Time      `json:"-"`
+	Summary       string         `gorm:"not null;default:''" json:"summary"` // 卡片展示名（中文摘要）：空则回落到 Name
+	ServiceType   string         `json:"serviceType"`                        // native | opensource（纯标注）
+	WebUrl        string         `json:"webUrl"`                             // 独立 Web 控制台地址（空 = 名称不可穿越）
+	ExePath       string         `json:"exePath"`                            // services/{os}/{arch}/{name}/{entrypoint}
+	Args          datatypes.JSON `json:"args"`
+	WorkDir       string         `json:"workDir"` // 固定 data/{name}（数据与产物分离）
+	Env           datatypes.JSON `json:"env"`
+	AutoStart     bool           `json:"autoStart"`
+	Priority      int            `json:"priority"`
+	DependsOn     datatypes.JSON `json:"dependsOn"` // 服务 id 数组（存 id 不存 name，防改名破坏引用）
 	RestartPolicy datatypes.JSON `json:"restartPolicy"`
 	HealthCheck   datatypes.JSON `json:"healthCheck"`
 	ConfigFile    datatypes.JSON `json:"configFile"`
@@ -61,7 +61,7 @@ type ServiceRuntime struct {
 // EventLog 事件流水（大盘“告警原因”与事件中心的数据源）。
 type EventLog struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	Type      string    `json:"type"`  // start|stop|restart|backoff|alert|usb|upgrade|publish|settings
+	Type      string    `json:"type"`  // start|stop|restart|backoff|alert|upgrade|publish|settings
 	Level     string    `json:"level"` // info | warn | error
 	ServiceID int       `json:"serviceId"`
 	Message   string    `json:"message"`
@@ -76,9 +76,8 @@ type EventLog struct {
 // backend-architecture §2.2 增补字段）。
 //
 // status 终态按 decisions.md D10 只有两值：success（换文件完成且启动指令已发出）/
-// failed（任一阶段出错）。rolledback 不再产生——D1 已取消自动回滚（B6：回退走
-// 本地上传旧版本包），枚举留作历史数据兼容。
-// operator 当前恒为 user（Web 手动）；usb/auto 通道不存在，取值留作扩展。
+// failed（任一阶段出错）。回退不走自动回滚，改由本地上传旧版本包。
+// operator 恒为 user（Web 手动）。
 type UpgradeRecord struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	TaskID      string    `gorm:"index" json:"taskId"`
@@ -88,8 +87,8 @@ type UpgradeRecord struct {
 	Source      string    `json:"source"` // local | ota
 	FromVersion string    `json:"fromVersion"`
 	ToVersion   string    `json:"toVersion"`
-	Status      string    `json:"status"`   // success | failed
-	Operator    string    `json:"operator"` // user | usb | auto（当前仅 user）
+	Status      string    `json:"status"`     // success | failed
+	Operator    string    `json:"operator"`   // user
 	DurationMs  int64     `json:"durationMs"` // 任务受理到终态的耗时
 	Detail      string    `json:"detail"`     // 成功摘要 / 失败原因
 	CreatedAt   time.Time `json:"-"`          // 任务受理时刻

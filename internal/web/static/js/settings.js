@@ -78,7 +78,6 @@ function fillAboutCard() {
   setText('set-about-version', v.version || '—');
   setText('set-about-build', v.buildTime || '—');
   setText('set-about-os', v.os || '—');
-  if (v.mock) setText('set-about-version', (v.version || '—') + '（演示数据）');
 }
 function collectSettings() {
   const out = {};

@@ -58,10 +58,10 @@ type dashboardView struct {
 }
 
 // stateKind 与前端 constants.js SERVICE_STATE.kind 对齐：
-// ok=正常 warn=告警 err=异常 muted=停用（muted 计入 err，与 mock 一致）。
+// ok=正常 warn=告警 err=异常。disabled 走 default，与前端 muted 分类分开计数。
 func stateKind(state string) string {
 	switch state {
-	case "running", "starting", "waiting", "stopping", "upgrading":
+	case "running", "starting", "waiting", "stopping":
 		return "ok"
 	case "degraded", "backoff":
 		return "warn"

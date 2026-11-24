@@ -1,8 +1,7 @@
-// Package api 持有全部 REST 处理器与三个 facade 接口。
+// Package api 持有全部 REST 处理器，以及监管与统计两个 facade。
 //
-// 依赖规则（架构 §1.3）：api 只依赖本包定义的 facade 接口，不 import
-// supervisor/update/collect 具体包；具体实现由 main 装配注入。骨架期的
-// B 类端点按里程碑逐块替换为真引擎适配器。
+// api 不 import supervisor。具体实现由 main 经 adapt 注入。
+// 升级任务在本包内执行，不经独立 facade。
 
 package api
 
@@ -55,11 +54,7 @@ type RunState struct {
 	ConsecutiveFailures int     `json:"consecutiveFailures"`
 	CpuPct              float64 `json:"cpuPct"`
 	MemMB               float64 `json:"memMB"`
-	NetRxKBps           float64 `json:"netRxKBps"`
-	NetTxKBps           float64 `json:"netTxKBps"`
 	CpuTimeSec          float64 `json:"cpuTimeSec"`
-	NetRxKB             float64 `json:"netRxKB"`
-	NetTxKB             float64 `json:"netTxKB"`
 	HealthState         string  `json:"healthState"`
 	LastError           string  `json:"lastError"`
 }
@@ -79,91 +74,21 @@ type SupervisorFacade interface {
 	States() map[int]RunState
 }
 
-// UpdateItem 是一条可用更新（TFTP index.json 清单项）。
-type UpdateItem struct {
-	ServiceID   int    `json:"serviceId"`
-	Version     string `json:"version"`
-	SizeBytes   int64  `json:"sizeBytes"`
-	PackageName string `json:"packageName"`
-	Sha256      string `json:"sha256"`
-}
-
-// ApplyRequest 是 POST /api/upgrade/apply 的请求体。
-type ApplyRequest struct {
-	ServiceID int    `json:"serviceId"`
-	Version   string `json:"version"`
-	Source    string `json:"source"` // tftp | usb | manual
-	Rollback  bool   `json:"rollback"`
-}
-
-// TaskBatch U盘批量升级的当前包指示。
-type TaskBatch struct {
-	Index       int    `json:"index"`
-	Total       int    `json:"total"`
-	PackageName string `json:"packageName"`
-}
-
-// TaskPackage U盘批量升级的单包结果。
-type TaskPackage struct {
-	PackageName string `json:"packageName"`
-	ServiceID   int    `json:"serviceId"`
-	Version     string `json:"version"`
-	Result      string `json:"result"` // pending|success|failed|rolledback
-	Detail      string `json:"detail"`
-}
-
-// TaskView 是 GET /api/upgrade/tasks/{id} 的响应形状（冻结契约）。
-type TaskView struct {
-	ID            string         `json:"id"`
-	Mode          string         `json:"mode"` // upgrade|rollback|usb
-	Source        string         `json:"source"`
-	ServiceID     int            `json:"serviceId"`
-	ServiceName   string         `json:"serviceName"`
-	TargetVersion string         `json:"targetVersion"`
-	Batch         *TaskBatch     `json:"batch"`
-	PhaseIndex    int            `json:"phaseIndex"`
-	Phase         string         `json:"phase"`
-	Progress      *int           `json:"progress"`
-	ReceivedBytes *int64         `json:"receivedBytes"`
-	TotalBytes    *int64         `json:"totalBytes"`
-	HealthElapsed *float64       `json:"healthElapsed"`
-	HealthTotal   *float64       `json:"healthTotal"`
-	Detail        string         `json:"detail"`
-	Status        string         `json:"status"` // running|success|failed|rolledback|partial
-	RolledBackTo  string         `json:"rolledBackTo"`
-	ReportNote    string         `json:"reportNote"`
-	StartedAt     int64          `json:"startedAt"`
-	FinishedAt    *int64         `json:"finishedAt"`
-	Packages      []*TaskPackage `json:"packages"`
-}
-
-// UpdateFacade 升级管线对 API 层暴露的能力（M2 替换为真管线）。
-type UpdateFacade interface {
-	// Check 按设置中的 TFTP 服务端返回可用更新清单。
-	Check() ([]UpdateItem, int64, error)
-	// Apply 受理一次升级/回滚/U盘批量任务；互斥：并发进行返回 409 httpError。
-	Apply(req ApplyRequest) (string, error)
-	// Task 返回任务当前视图（推进按惰性时间模型计算）。
-	Task(id string) (*TaskView, error)
-}
-
 // StatsView 是单服务统计曲线视图（时间桶数组）。
 type StatsView struct {
 	UptimeSec    float64 `json:"uptimeSec"`
 	RestartTotal int     `json:"restartTotal"`
 	CpuTimeSec   float64 `json:"cpuTimeSec"`
-	NetRxKB      float64 `json:"netRxKB"`
-	NetTxKB      float64 `json:"netTxKB"`
 	Cpu          []int   `json:"cpu"`
 	Mem          []int   `json:"mem"`
 }
 
-// StatsSource 采集统计对 API 层暴露的能力（M3 替换为 gopsutil 采样）。
+// StatsSource 单服务 CPU/内存曲线。实现由 main 注入。
 type StatsSource interface {
 	Series(serviceID int) (StatsView, bool)
 }
 
-// LogLine 是日志中心的一条行对象（真实路径与 fake 路径产出同一形状）。
+// LogLine 是日志中心的一条行对象。
 type LogLine struct {
 	Ts      int64  `json:"ts"`
 	Level   string `json:"level"`
@@ -177,17 +102,14 @@ type Server struct {
 	Settings *store.SettingsStore
 
 	Supervisor SupervisorFacade
-	Updater    UpdateFacade
 	Stats      StatsSource
 
-	// Defs 定义变更钩子（保存/安装/删除后触发引擎差量调谐）；
-	// demo 与真引擎各挂实现（装配矩阵见 M1 方案 §1）。
+	// Defs 定义变更钩子（保存/安装/删除后触发引擎差量调谐）。
 	Defs DefsHook
-	// Host 大盘主机资源概览源（demo 随机游走 / 真实 /proc 读取）。
+	// Host 大盘主机资源概览（CPU/内存/磁盘百分比与网卡累计字节）。
 	Host HostSource
 
 	RuntimeName string    // "fork"
-	Mock        bool      // 兼容字段（demo 已退役，恒 false）
 	StartedAt   time.Time // 平台自身启动时间
 
 	// Tasks 升级任务队列（全局串行，decisions.md D7）。
@@ -195,7 +117,7 @@ type Server struct {
 }
 
 // DefsHook 服务定义变更钩子：API 写路径（保存/安装/删除）完成后通知，
-// 引擎据此差量调谐（指纹两档）；实现由 main 装配注入（demo / 真引擎适配）。
+// 引擎据此差量调谐（指纹两档）；实现由 main 装配注入。
 type DefsHook interface {
 	OnDefsSaved(def store.Service)
 	OnDefsDeleted(id int, name string)
@@ -211,7 +133,7 @@ type HostSource interface {
 	HostCounters() (uptimeSec, rxBytes, txBytes float64)
 }
 
-// New 构造基础 Server（无演示引擎；服务定义 CRUD/设置/版本仍可用）。
+// New 构造 Server。监管与统计由调用方在返回后注入。
 func New(db *gorm.DB, settings *store.SettingsStore, startedAt time.Time) *Server {
 	s := &Server{DB: db, Settings: settings, StartedAt: startedAt, Tasks: newTaskManager()}
 	// 任务终态回调 → 升级台账落库（M2-8：operator/durationMs）。
@@ -248,12 +170,6 @@ func failIssues(w http.ResponseWriter, summary string, issues []config.Issue) {
 	})
 }
 
-// notImplemented 501：路由已注册、实现留待后续里程碑的统一出口，
-// 前端 MOCK=false 联调时可区分“未实现”与“出错”。
-func notImplemented(w http.ResponseWriter, what string) {
-	fail(w, http.StatusNotImplemented, "未实现（"+what+"），留待后续里程碑")
-}
-
 // Health 存活探针：进程能响应即为存活。
 func (s *Server) Health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "time": time.Now().Format(time.RFC3339)})
@@ -272,7 +188,7 @@ func (s *Server) Ready(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
 }
 
-// versionInfo GET /api/version 的响应（前端顶部演示角标据 mock/runtime 判定）。
+// versionInfo GET /api/version 的响应。
 type versionInfo struct {
 	Name      string  `json:"name"`
 	Version   string  `json:"version"`
@@ -280,7 +196,6 @@ type versionInfo struct {
 	OS        string  `json:"os"`
 	Daemon    string  `json:"daemon"`
 	UptimeSec float64 `json:"uptimeSec"`
-	Mock      bool    `json:"mock"`
 	Runtime   string  `json:"runtime"`
 }
 
@@ -293,7 +208,6 @@ func (s *Server) GetVersion(w http.ResponseWriter, r *http.Request) {
 		OS:        goruntimeOS(),
 		Daemon:    daemonLabel(),
 		UptimeSec: time.Since(s.StartedAt).Seconds(),
-		Mock:      s.Mock,
 		Runtime:   s.RuntimeName,
 	})
 }

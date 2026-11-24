@@ -109,28 +109,29 @@ async function startUpgrade(body) {
   }
 }
 
-/* ── 新后端任务 → 旧 UI 模型适配（decisions.md D10：无 health 观察阶段） ── */
-const TASK_PHASE_MAP = {
-  queued:     { key: 'download', idx: 0 },
-  downloading:{ key: 'download', idx: 0 },
-  verifying:  { key: 'verify',   idx: 1 },
-  precheck:   { key: 'precheck', idx: 2 },
-  stopping:   { key: 'stop',     idx: 3 },
-  swapping:   { key: 'switch',   idx: 5 }, /* install+switch 合并为 swapping */
-  starting:   { key: 'health',   idx: 6 },
-  success:    { key: 'commit',   idx: 7 },
-  failed:     { key: 'commit',   idx: 7 }, /* 终态槽位：失败红点落在最后一步，而非误标下载 */
-};
+/* 阶段条与任务队列的 phase 同名。首装没有停服和发起启动；本地包没有下载。 */
+function upgradePhases(t) {
+  const phases = [];
+  if (t && t.source === 'ota') phases.push({ key: 'downloading', label: '下载' });
+  phases.push({ key: 'verifying', label: '校验' }, { key: 'precheck', label: '预检' });
+  if (!t || t.mode !== 'install') phases.push({ key: 'stopping', label: '停服' });
+  phases.push({ key: 'swapping', label: '换文件' });
+  if (!t || t.mode !== 'install') phases.push({ key: 'starting', label: '发起启动' });
+  return phases;
+}
 function adaptTask(t) {
-  const m = TASK_PHASE_MAP[t.phase] || TASK_PHASE_MAP.queued;
-  let key = m.key, idx = m.idx;
-  /* install 模式（市场安装/OTA 首装）没有「停服」阶段，包的落盘也不经过
-   * 「切换」语义：swapping 映射到「安装」，任务弹窗的阶段清单与实际
-   * 执行管线保持一致（P0：市场安装改走部署管线后的展示适配）。 */
-  if (t.mode === 'install' && t.phase === 'swapping') { key = 'install'; idx = 4; }
+  const phases = upgradePhases(t);
+  const terminal = t.phase === 'success' || t.phase === 'failed';
+  let idx = phases.findIndex(p => p.key === t.phase);
+  if (t.phase === 'queued') idx = 0;
+  if (terminal) idx = phases.length - 1;
+  if (idx < 0) idx = 0;
   return {
-    status: t.phase === 'success' ? 'success' : t.phase === 'failed' ? 'failed' : 'running',
-    phase: key, phaseIndex: idx, mode: t.source === 'ota' ? 'ota' : 'manual',
+    status: terminal ? t.phase : 'running',
+    phase: terminal ? phases[idx].key : (t.phase === 'queued' ? phases[0].key : t.phase),
+    phaseIndex: idx,
+    phases,
+    mode: t.source === 'ota' ? 'ota' : 'manual',
     serviceName: t.name, targetVersion: t.toVersion, fromVersion: t.fromVersion,
     detail: t.error || t.detail || '', source: t.source, taskId: t.taskId,
   };
@@ -185,7 +186,7 @@ function renderTaskBanner(t) {
   const b = el('up-task-banner');
   if (!state.update.taskActive) { b.classList.add('d-none'); renderServiceCards(); renderTftpBanner(); return; }
   t = t || state.update.taskSnapshot;
-  const phaseLabel = t && t.phase ? ((UPGRADE_PHASES.find(p => p.key === t.phase) || {}).label || t.phase) : '准备中';
+  const phaseLabel = t && t.phase ? (((t.phases || []).find(p => p.key === t.phase) || {}).label || t.phase) : '准备中';
   const name = (t && t.serviceName) || '服务';
   b.innerHTML = '<i class="bi bi-arrow-repeat me-2"></i><b>升级进行中：' + escapeHtml(name) + '</b> · 当前阶段：' + phaseLabel +
     ' <span class="text-muted">（点击查看进度）</span>';
@@ -207,7 +208,8 @@ function renderUpgradeModal(t) {
   if (!t) return;
   setText('um-svc', t.serviceName || '服务');
 
-  el('um-phases').innerHTML = UPGRADE_PHASES.map((p, i) => {
+  const phases = t.phases || upgradePhases(t);
+  el('um-phases').innerHTML = phases.map((p, i) => {
     let cls = '', dot = '';
     if (i < t.phaseIndex) { cls = 'done'; dot = '<i class="bi bi-check-lg"></i>'; }
     else if (i === t.phaseIndex) {
@@ -265,8 +267,7 @@ function renderRecords() {
   st.innerHTML = '';
   const locked = upgradeLocked();
   tb.innerHTML = rows.map(r => {
-    // 后端返回旧口径基础字段（id/level/serviceId/message/at）保证兼容；
-    // M2-8 台账起追加结构化字段（source/mode/durationMs/…），有则展示。
+    // 行上同时有 message/at 和 source/mode/durationMs。
     const lvl = { info: ['badge-ok', '成功'], warn: ['badge-w', '警告'], error: ['badge-err', '失败'] }[r.level] || ['badge-muted', r.level || '—'];
     const svc = svcById(r.serviceId);
     const svcName = r.name || (svc ? svcTitle(svc) : ('#' + r.serviceId));
@@ -293,8 +294,7 @@ function promptLocalRollback(serviceId) {
   showToast('info', '回退方式：获取旧版本 .cairnpkg（如从导出或服务器历史包下载），在升级页选择「本地包升级」上传安装。' + (svc ? '（' + svc.name + '）' : ''));
 }
 
-/* ══════════════ 升级来源 modal（OTA / OTG / LOCAL） ══════════════ */
-/* USB/OTG 已随方案裁撤（decisions.md A2）：rescan/batch 等函数一并移除。 */
+/* ══════════════ 升级来源：OTA 或本地 .cairnpkg ══════════════ */
 function openUpgradeSource(serviceId) {
   const row = svcById(serviceId);
   if (!row) return;

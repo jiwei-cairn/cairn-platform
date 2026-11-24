@@ -174,7 +174,6 @@ func RequestLogLevel(method, path string, status int) slog.Level {
 		switch {
 		case strings.HasPrefix(path, "/api/dashboard"),
 			strings.HasPrefix(path, "/api/logs"),
-			strings.HasPrefix(path, "/api/usb/status"),
 			strings.HasPrefix(path, "/api/upgrade/tasks"),
 			strings.HasPrefix(path, "/api/upgrade/records"),
 			strings.HasPrefix(path, "/api/events"),

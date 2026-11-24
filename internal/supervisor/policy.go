@@ -14,21 +14,21 @@ import (
 // Policy worker 需要的监管参数（从 Service 的 JSON Blob 解析 + 默认值回落）。
 type Policy struct {
 	// RestartPolicy
-	RestartMode  string // periodic（固定周期）| backoff（指数退避）；旧值 always/onFailure 归一为 backoff
-	PeriodicSec  int    // periodic 模式：异常退出后固定拉起间隔（默认/最小 3s）
-	MaxRetries   int    // 窗口内最大启动失败数（0=不限，熔断配额）
-	WindowSec    int    // 滑动窗口长度（0=不限）
-	BackoffBase  int    // backoff 模式：退避基数秒（默认 2）
-	BackoffMax   int    // backoff 模式：退避封顶秒（默认 300）
+	RestartMode string // periodic | backoff。存量行里的 always/onFailure 在下面折成 backoff
+	PeriodicSec int    // periodic 模式：异常退出后固定拉起间隔（默认/最小 3s）
+	MaxRetries  int    // 窗口内最大启动失败数（0=不限，熔断配额）
+	WindowSec   int    // 滑动窗口长度（0=不限）
+	BackoffBase int    // backoff 模式：退避基数秒（默认 2）
+	BackoffMax  int    // backoff 模式：退避封顶秒（默认 300）
 	// HealthCheck
-	HealthType          string // none | http | tcp
-	HealthTarget        string
-	IntervalSec         int
-	TimeoutSec          int
-	ReadyHoldSec        int
-	FailuresThreshold   int // L2 连续失败判 degraded
-	DegradedRestartSec  int
-	RecoverThreshold    int // degraded 恢复需连续成功次数（supervisord 经验，默认 2）
+	HealthType         string // none | http | tcp
+	HealthTarget       string
+	IntervalSec        int
+	TimeoutSec         int
+	ReadyHoldSec       int
+	FailuresThreshold  int // L2 连续失败判 degraded
+	DegradedRestartSec int
+	RecoverThreshold   int // degraded 恢复需连续成功次数（supervisord 经验，默认 2）
 }
 
 // ParsePolicy 解析 Service 定义；缺省字段回落默认值（与 api.defaultPolicyBlobs 同源）。

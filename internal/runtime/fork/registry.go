@@ -74,8 +74,8 @@ func (r *Runtime) loadReg(name string) (*regEntry, error) {
 // clearReg 清除登记（RemoveUnit 时）。
 func (r *Runtime) clearReg(name string) { _ = os.Remove(r.regPath(name)) }
 
-// resolveExe 解析符号链接后的绝对路径（current 软链 → 真实版本目录，
-// 认领时与 /proc/{pid}/exe 前缀比对用）。
+// resolveExe 把可执行文件路径解析成绝对路径，并展开符号链接。
+// 认领时用它和进程映像路径比对。
 func resolveExe(p string) string {
 	if abs, err := filepath.Abs(p); err == nil {
 		if rp, err2 := filepath.EvalSymlinks(abs); err2 == nil {

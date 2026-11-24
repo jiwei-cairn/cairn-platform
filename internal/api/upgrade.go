@@ -816,7 +816,7 @@ func (s *Server) recordUpgradeRecord(t *upgradeTask) {
 		TaskID: t.ID, ServiceName: t.Name, Mode: t.Mode, Source: t.Source,
 		FromVersion: t.FromVer, ToVersion: t.ToVer,
 		Status:   status,
-		Operator: "user", // 当前全部入口均为 Web 手动；usb/auto 通道不存在，取值留作扩展
+		Operator: "user",
 		// 耗时口径：任务受理（入队）到终态。排队等待也计入——对使用者而言
 		// 「点了升级到看到结果」的等待就是这段时间；串行队列下排队通常极短。
 		DurationMs: time.Since(t.CreatedAt).Milliseconds(),

@@ -10,8 +10,9 @@
 //   - 大小上限：读取/保存均 ≤ 1MB（配置是文本，不是日志/数据）
 //   - 二进制拒绝：非文本内容只读（editable=false），避免编辑器把二进制写坏
 //
-// 保存语义：先备份（{file}.bak.{unix}，按 configFile.maxHistory 保留最近 N 份）
-// → 原子写（.tmp + rename）。applyMode=restart 时由调用方决定是否重启。
+// 保存语义：原子写（.tmp + rename），不保留多份历史。
+// 启动验证通过后另存一份 {file}.lastgood，供一键恢复。
+// applyMode=restart 由调用方决定是否重启；command 未实现。
 package api
 
 import (
@@ -45,7 +46,6 @@ type configFileView struct {
 	Editable    bool   `json:"editable"`   // 非文本内容为 false
 	ApplyMode   string `json:"applyMode"`  // restart | command
 	ValidateCmd string `json:"validateCmd"`
-	MaxHistory  int    `json:"maxHistory"`
 }
 
 // normalizeCfgPath 把 configFile.path 归一为「相对服务根的包内路径」。
@@ -145,7 +145,6 @@ type configFilePolicy struct {
 	ValidateCmd string `json:"validateCmd"`
 	ApplyMode   string `json:"applyMode"`
 	ApplyCmd    string `json:"applyCmd"`
-	MaxHistory  int    `json:"maxHistory"`
 }
 
 // parseConfigFile 解析 configFile blob（缺失字段给安全默认）。
@@ -154,9 +153,6 @@ func parseConfigFile(raw []byte) configFilePolicy {
 	_ = jsonUnmarshalLenient(raw, &p)
 	if p.ApplyMode == "" {
 		p.ApplyMode = "restart"
-	}
-	if p.MaxHistory <= 0 {
-		p.MaxHistory = 10
 	}
 	return p
 }
@@ -217,7 +213,7 @@ func (s *Server) GetConfigfile(w http.ResponseWriter, r *http.Request) {
 		Content: string(raw), SizeBytes: st.Size(),
 		ModifiedAt: st.ModTime().UnixMilli(),
 		Editable:   isTextContent(raw),
-		ApplyMode:  pol.ApplyMode, ValidateCmd: pol.ValidateCmd, MaxHistory: pol.MaxHistory,
+		ApplyMode:  pol.ApplyMode, ValidateCmd: pol.ValidateCmd,
 	})
 }
 
@@ -437,7 +433,7 @@ func (s *Server) ConfigfileHistory(w http.ResponseWriter, r *http.Request) {
  *     被 L2 验证证明"能跑"，固化为唯一备份 {file}.lastgood；
  *   - 保存：用户自由修改→保存→重启；起不来就继续改（无限次重试）；
  *   - 恢复：一直改不好时点「恢复」→ 快照写回 → 重启 → 恢复运行；
- *   - 不保留 N 份历史（.bak.{unix}/maxHistory 已裁撤），保存动作本身不留档。
+ *   - 不保留多份历史，保存动作本身不留档。
  */
 
 // lastgoodSuffix 快照文件后缀（服务根目录内，与配置文件同目录）。

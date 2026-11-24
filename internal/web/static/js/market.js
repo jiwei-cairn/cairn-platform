@@ -13,7 +13,6 @@ const MARKET_TAB_HINT = {
   installed: '当前已纳管安装的微服务',
   disabled:  '已停用（enabled = false）的微服务',
   product:   '官方产品套件：多微服务组合，一键部署',
-  tools:     '物联网辅助调试工具（扩展预留，即将上线）',
 };
 
 /* ── 进入区块（switchSection 钩子） ── */
@@ -129,14 +128,6 @@ function renderMarketGrid() {
   const grid = el('market-grid');
   const st = el('market-state');
   if (!grid) return;
-
-  /* 工具 tab：独立渲染（不走目录数据，占位说明卡片）。 */
-  if (state.market.tab === 'tools') {
-    grid.innerHTML = IOT_TOOLS.map(toolCardHtml).join('');
-    st.innerHTML = '';
-    el('market-tag-chips').innerHTML = '';
-    return;
-  }
 
   if (state.market.catalogError && !state.market.catalog) {
     grid.innerHTML = '';
@@ -348,37 +339,4 @@ function waitUpgradeTaskDone(taskId) {
       }
     }, 1000);
   });
-}
-
-/* ══════════════════════════════════════════════
-   工具 tab：物联网辅助调试工具（扩展预留，当前占位）
-   未来集成 cantest / nats-cli / modbus 等调试工具，
-   以微服务形式安装运行或内嵌 Web 终端。
-   ══════════════════════════════════════════════ */
-
-const IOT_TOOLS = [
-  { key: 'cantest',    name: 'CAN Test',         icon: 'bi-broadcast',   desc: 'CAN 总线调试：发送/接收报文、DBC 解析、总线监控、错误帧统计', tags: ['CAN', '总线', '调试'] },
-  { key: 'modbus',     name: 'Modbus Poll',      icon: 'bi-ethernet',    desc: 'Modbus RTU/TCP 主从站模拟：寄存器读写、批量轮询、报文抓取', tags: ['Modbus', 'RTU', 'TCP'] },
-  { key: 'nats-cli',   name: 'NATS CLI',         icon: 'bi-arrow-left-right', desc: 'NATS 消息总线命令行：pub/sub/request、队列监控、JetStream 管理', tags: ['NATS', '消息'] },
-  { key: 'mqtt',       name: 'MQTT Client',      icon: 'bi-wifi-router', desc: 'MQTT 连接测试：主题订阅/发布、遗嘱消息、QoS 验证、报文日志', tags: ['MQTT', 'IoT'] },
-  { key: 'serial',     name: 'Serial Terminal',  icon: 'bi-usb-symbol',  desc: '串口终端：RS-485/232 波特率扫描、十六进制/ASCII 视图、脚本回放', tags: ['串口', 'RS-485'] },
-  { key: 'sniffer',    name: 'Protocol Sniffer', icon: 'bi-activity',    desc: '多协议抓包分析：自动识别 Modbus/MQTT/HTTP/自定义帧，时间线视图', tags: ['抓包', '分析'] },
-];
-
-function toolCardHtml(t) {
-  return '<div class="market-card" style="opacity:.75">' +
-    '<div class="market-card-head">' +
-      '<div class="model-card-icon"><i class="bi ' + t.icon + '"></i></div>' +
-      '<div class="min-w-0">' +
-        '<div class="market-card-name">' + escapeHtml(t.name) + '</div>' +
-        '<div class="market-card-meta">辅助调试工具</div>' +
-      '</div>' +
-      '<span class="badge badge-muted">即将上线</span>' +
-    '</div>' +
-    '<div class="market-card-desc">' + escapeHtml(t.desc) + '</div>' +
-    '<div class="market-card-tags">' + t.tags.map(tag => '<span class="mc-tag">' + escapeHtml(tag) + '</span>').join('') + '</div>' +
-    '<div class="market-card-actions">' +
-      '<button class="btn btn-outline-secondary btn-sm" disabled><i class="bi bi-hourglass-split me-1"></i>开发中</button>' +
-    '</div>' +
-    '</div>';
 }

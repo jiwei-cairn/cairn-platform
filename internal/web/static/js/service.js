@@ -139,7 +139,7 @@ function cardHtml(s) {
   const meta = SERVICE_STATE[st] || SERVICE_STATE.unknown;
   const rt = s.runtime || {};
   const disabled = st === 'disabled';
-  const busy = ['starting', 'stopping', 'waiting', 'upgrading'].includes(st);
+  const busy = ['starting', 'stopping', 'waiting'].includes(st);
   const runningIsh = ['running', 'degraded', 'backoff'].includes(st);
   const stoppedIsh = ['stopped', 'failed'].includes(st);
   const locked = state.update.taskActive;
@@ -394,13 +394,13 @@ function onSmRestartModeChange() {
 }
 
 async function loadSvcStats(id) {
-  setHtml('sm-stats-body', ['连续运行时长', '累计启动', 'CPU 时间', '网络累计流量'].map(l =>
-    '<div class="col-6 col-md-3"><div class="summary-card mini"><div class="val">…</div><div class="lbl">' + l + '</div></div></div>').join(''));
+  setHtml('sm-stats-body', ['连续运行时长', '累计启动', 'CPU 时间'].map(l =>
+    '<div class="col-6 col-md-4"><div class="summary-card mini"><div class="val">…</div><div class="lbl">' + l + '</div></div></div>').join(''));
   try {
     const st = await apiGet('/services/' + id + '/stats');
-    const cells = [fmtUptime(st.uptimeSec), String(st.restartTotal ?? '—'), fmtUptime(st.cpuTimeSec), '↓' + fmtBytes((st.netRxKB || 0) * 1024) + ' ↑' + fmtBytes((st.netTxKB || 0) * 1024)];
-    const labels = ['连续运行时长', '累计启动', 'CPU 时间', '网络累计流量'];
-    let html = labels.map((l, i) => '<div class="col-6 col-md-3"><div class="summary-card mini"><div class="val">' + cells[i] + '</div><div class="lbl">' + l + '</div></div></div>').join('');
+    const cells = [fmtUptime(st.uptimeSec), String(st.restartTotal ?? '—'), fmtUptime(st.cpuTimeSec)];
+    const labels = ['连续运行时长', '累计启动', 'CPU 时间'];
+    let html = labels.map((l, i) => '<div class="col-6 col-md-4"><div class="summary-card mini"><div class="val">' + cells[i] + '</div><div class="lbl">' + l + '</div></div></div>').join('');
     if (st.cpu && st.cpu.length > 2) html += sparklineHtml(st.cpu);
     setHtml('sm-stats-body', html);
   } catch (e) {
@@ -439,7 +439,7 @@ async function saveService() {
     let res;
     if (isNew) {
       res = await apiPost('/services/install', buildInstallRequest(f));
-      showToast('success', '服务已创建（说明卡与版本目录已生成）');
+      showToast('success', '服务已创建');
     } else {
       res = await apiPost('/services', serviceToPayload(f));
       showToast('success', '服务已保存');

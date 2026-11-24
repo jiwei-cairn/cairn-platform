@@ -358,20 +358,13 @@ func (s *Server) upsertServiceDef(def *store.Service, hasSvc bool, m *pack.Manif
 	if env == nil {
 		env = map[string]string{}
 	}
-	deps := make([]int, 0, len(m.Deps))
-	for _, dep := range m.Deps {
-		var d store.Service
-		if s.DB.First(&d, "name = ?", dep).Error == nil {
-			deps = append(deps, d.ID)
-		}
+	selfID := 0
+	if hasSvc {
+		selfID = def.ID
 	}
-	// 依赖环检测（安装/升级写路径防御，新增节点入图）。
-	if len(deps) > 0 {
-		var all []store.Service
-		s.DB.Order("id asc").Find(&all)
-		if cycle := detectDependsCycle(all, 0, deps); cycle != "" {
-			return fmt.Errorf("依赖形成环：%s", cycle)
-		}
+	deps, err := s.resolveDeps(m.Deps, selfID)
+	if err != nil {
+		return err
 	}
 
 	exePath := filepath.Join(s.installRoot(), m.Name, filepath.FromSlash(m.Entrypoint))
@@ -410,11 +403,7 @@ func (s *Server) upsertServiceDef(def *store.Service, hasSvc bool, m *pack.Manif
 		return fmt.Errorf("落库失败: %w", err)
 	}
 	if s.Defs != nil {
-		if hasSvc {
-			s.Defs.OnDefsSaved(*def)
-		} else {
-			s.Defs.OnDefsSaved(*def)
-		}
+		s.Defs.OnDefsSaved(*def)
 	}
 	return nil
 }
@@ -422,7 +411,7 @@ func (s *Server) upsertServiceDef(def *store.Service, hasSvc bool, m *pack.Manif
 // applyManifestPolicies 包内运行策略覆盖默认值（仅非空字段生效）。
 func applyManifestPolicies(def *store.Service, m *pack.Manifest) {
 	if len(m.RestartPolicy) > 0 && string(m.RestartPolicy) != "null" {
-		def.RestartPolicy = datatypesJSON(m.RestartPolicy)
+		def.RestartPolicy = datatypesJSON(coerceRestartPolicy(m.RestartPolicy))
 	}
 	if len(m.HealthCheck) > 0 && string(m.HealthCheck) != "null" {
 		def.HealthCheck = datatypesJSON(m.HealthCheck)
@@ -436,10 +425,7 @@ func applyManifestPolicies(def *store.Service, m *pack.Manifest) {
 		// 路径（历史 bug：配置编辑器与启动参数解析都因此找不到文件）。
 		for _, f := range m.Files {
 			if f.Role == pack.RoleConfig {
-				def.ConfigFile = mustJSON(map[string]any{
-					"path":        filepath.ToSlash(f.Path),
-					"validateCmd": "", "applyMode": "restart", "applyCmd": "", "maxHistory": 10,
-				})
+				def.ConfigFile = configFileBlob(filepath.ToSlash(f.Path))
 				logx.Module("deploy").Info("configFile 策略已按包内 config 角色生成", "svc", m.Name, "path", f.Path)
 				break
 			}
@@ -467,7 +453,7 @@ func hasConfigRole(m *pack.Manifest) bool {
 // isRunningState 判断监管态是否"进程在跑"。
 func isRunningState(st string) bool {
 	switch st {
-	case "running", "degraded", "backoff", "starting", "waiting", "upgrading", "stopping":
+	case "running", "degraded", "backoff", "starting", "waiting", "stopping":
 		return true
 	}
 	return false

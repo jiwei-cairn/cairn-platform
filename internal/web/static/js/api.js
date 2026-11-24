@@ -47,7 +47,7 @@ function serviceFromRow(r) {
     failuresThreshold: toNum(hc.failuresThreshold, 3), degradedRestartSec: toNum(hc.degradedRestartSec, 30),
     dependsOn: (r.dependsOn || []).map(String),
     cfgPath: cf.path || '', validateCmd: cf.validateCmd || '', applyMode: cf.applyMode || 'restart',
-    applyCmd: cf.applyCmd || '', cfgMaxHistory: toNum(cf.maxHistory, 10),
+    applyCmd: cf.applyCmd || '',
     logMaxSizeMB: toNum(lp.maxSizeMB, 10), logMaxBackups: toNum(lp.maxBackups, 3),
   };
 }
@@ -113,4 +113,4 @@ function rtState(row) {
   if (state.optimistic && state.optimistic[row.id]) return state.optimistic[row.id];
   return (row.runtime && row.runtime.state) || 'stopped';
 }
-function isRunningIsh(row) { return ['running', 'degraded', 'backoff', 'starting', 'waiting', 'upgrading'].includes(rtState(row)); }
+function isRunningIsh(row) { return ['running', 'degraded', 'backoff', 'starting', 'waiting'].includes(rtState(row)); }

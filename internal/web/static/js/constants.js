@@ -4,23 +4,21 @@
 
 /* 服务运行态 → LED / badge / 中文标签 / 分类
    分类: ok=正常  warn=告警  err=异常  muted=停用
-   状态枚举对齐架构设计 §3.1（9 态 + disabled 由 enabled=false 推导） */
+   监管八态 + disabled（enabled=false 时由接口覆盖） */
 const SERVICE_STATE = {
   running:   { label: '运行中',   led: 'led-on',      badge: 'badge-ok',    kind: 'ok' },
   starting:  { label: '启动中',   led: 'led-pending', badge: 'badge-plain', kind: 'ok' },
   waiting:   { label: '等待依赖', led: 'led-pending', badge: 'badge-plain', kind: 'ok' },
   stopping:  { label: '停止中',   led: 'led-pending', badge: 'badge-plain', kind: 'ok' },
-  upgrading: { label: '升级中',   led: 'led-pending', badge: 'badge-plain', kind: 'ok' },
   degraded:  { label: '降级',     led: 'led-warn',    badge: 'badge-r',     kind: 'warn' },
   backoff:   { label: '退避中',   led: 'led-warn',    badge: 'badge-r',     kind: 'warn' },
   failed:    { label: '异常',     led: 'led-err',     badge: 'badge-err',   kind: 'err' },
-  stopped:   { label: '已停止',   led: 'led-off',     badge: 'badge-muted', kind: 'err' }, // enabled 但 stopped 计异常
+  stopped:   { label: '已停止',   led: 'led-off',     badge: 'badge-muted', kind: 'err' },
   disabled:  { label: '已停用',   led: 'led-off',     badge: 'badge-muted', kind: 'muted' },
   unknown:   { label: '未知',     led: 'led-off',     badge: 'badge-muted', kind: 'err' },
 };
 
 const SERVICE_TYPE_LABEL = { native: '自研', opensource: '开源' };
-const APPLY_MODE_LABEL   = { restart: '重启服务', command: '执行热加载' };
 
 /* 日志级别 → 着色类（INFO 用默认色） */
 const LOG_LEVEL_META = {
@@ -30,41 +28,18 @@ const LOG_LEVEL_META = {
   ERROR: { cls: 'log-lvl-error' },
 };
 
-/* 升级阶段清单（交互说明 5.2.3：下载→验签→预检→停服→安装→切换→健康观察→提交） */
-const UPGRADE_PHASES = [
-  { key: 'download', label: '下载' },
-  { key: 'verify',   label: '验签' },
-  { key: 'precheck', label: '预检' },
-  { key: 'stop',     label: '停服' },
-  { key: 'install',  label: '安装' },
-  { key: 'switch',   label: '切换' },
-  { key: 'health',   label: '健康观察' },
-  { key: 'commit',   label: '提交' },
-];
-/* 回滚阶段已随「覆盖式升级无多版本目录」裁撤（decisions.md B6/D1：
-   回退 = 重新上传旧版包）；原 ROLLBACK_PHASES / UPGRADE_SOURCE / RECORD_STATUS
-   均已移除——升级历史改为消费后端 EventLog 口径（level + message）。 */
-
-/* 日志环形缓冲上限默认值（交互说明 3.7 步骤 3）。
-   实际取值以设置为准（logQuota.bufferLines），由 logBufferMax() 解析。 */
+/* 日志环形缓冲上限默认值。实际取值以设置为准（logQuota.bufferLines）。 */
 const LOG_BUFFER_MAX_DEFAULT = 2000;
 
-/* 重启策略标签：与后端实际落库的 restartPolicy.mode 取值一致（backoff | periodic）。
-   历史键 always/onFailure 来自已废弃的设计，导致服务卡片恒显示兜底文案。 */
 const RESTART_MODE_LABEL = { backoff: '退避重启', periodic: '周期重启' };
 
-/* 市场 tab（用户需求：我的=自研 / 发现=全目录 / 已安装 / 已禁用 / 产品=官方套件 / 工具=调试工具） */
 const MARKET_TABS = [
   { key: 'mine',     label: '我的',     icon: 'bi-person-workspace' },
   { key: 'discover', label: '发现',     icon: 'bi-compass' },
   { key: 'installed',label: '已安装',   icon: 'bi-check2-circle' },
   { key: 'disabled', label: '已禁用',   icon: 'bi-slash-circle' },
   { key: 'product',  label: '产品',     icon: 'bi-box-seam' },
-  { key: 'tools',    label: '工具',     icon: 'bi-tools' },
 ];
-
-/* 说明：UPGRADE_SOURCE 与 RECORD_STATUS 已移除——升级历史消费后端
-   EventLog 口径（level + message），不再有 fromVersion/toVersion/status。 */
 
 /* 全局 state —— 前端唯一数据源（交互说明 §1.2） */
 const state = {
@@ -97,7 +72,7 @@ const state = {
   settings: null, settingsLoading: false, settingsError: null,
   /* 市场 */
   market: {
-    tab: 'discover',          // 当前 tab：mine|discover|installed|disabled|product
+    tab: 'discover',          // mine|discover|installed|disabled|product
     activeTags: [],           // 标签筛选（交集）
     catalog: null,            // /api/market/catalog 发现目录
     catalogError: null,

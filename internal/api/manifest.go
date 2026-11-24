@@ -1,28 +1,14 @@
-// manifest.go — 安装制核心：服务安装清单（manifest.json）解析、安装预检、
-// 版本目录落盘与安装入口。
+// manifest.go — 松散文件安装：manifest 说明 + 已上传的二进制/配置，预检后落盘建档。
 //
-// 产品边界（安装制定稿）：平台只管理由平台安装的服务。所有微服务（自研与
-// 开源）一律通过「下载版本 + 安装」进入平台，安装时携带 manifest 说明文档
-// 与运行参数；不再支持纳管既有 systemd 单元（adopt 已退役）。
+// 与 deploy.go 的 .cairnpkg 流水线共用同一扁平目录，输入不同：
+// 这里收表单上传的单个文件；包安装走升级队列（校验、停服、换文件）。
 //
-// 落盘布局（运行目录下服务仓库，os/arch 按本机平台自动展开；与
-// ServiceVersion.retainedVersions / 回滚机制对齐）：
+//	services/{os}/{arch}/{name}/bin/{binary}
+//	services/{os}/{arch}/{name}/dependencies/{dll…}
+//	services/{os}/{arch}/{name}/config/{conf…}
+//	services/{os}/{arch}/{name}/manifest.json
 //
-//	services/{os}/{arch}/{name}/{version}/bin/{binary}          ← 主程序
-//	services/{os}/{arch}/{name}/{version}/dependencies/{dll…}   ← 依赖文件
-//	services/{os}/{arch}/{name}/{version}/config/{conf…}        ← 初始配置
-//	services/{os}/{arch}/{name}/{version}/manifest.json         ← 清单原样留存
-//	services/{os}/{arch}/{name}/current → {version}             ← 版本切换软链（Linux）
-//	services/{os}/{arch}/{name}/current.txt                     ← Windows 人读指针
-//
-// 启动参数可用相对路径引用（workDir 默认 = 版本目录）：
-//
-//	-c config/app.conf          ← 配置文件
-//	-L dependencies/libxxx.so   ← 动态库
-//
-// 升级/回滚 = 落新版本目录后原子切换 current（rename(2) 语义）并更新
-// ServiceVersion.Active 与定义的 exePath。exePath 以 DB 为权威（完整展开路径），
-// fork 认领的 resolvedExe 前缀匹配不受影响。
+// 工作目录固定为 data/{name}，与产物目录分开。覆盖式升级不保留多版本目录。
 package api
 
 import (
@@ -51,15 +37,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// installRoot 服务仓库根：运行目录下 services/{os}/{arch}（os/arch 按本机
-// 运行平台自动展开——设备上只见本机平台子树；同一结构兼作 U 盘服务仓库/
-// 市场下载缓存形态，与 GOOS/GOARCH 工具链命名直接对应）。
+// installRoot 服务仓库根：services/{os}/{arch}，按本机平台展开。
 func (s *Server) installRoot() string {
 	return config.ServicesDir(goruntime.GOOS, goruntime.GOARCH)
 }
-
-// switchCurrentLink 已随版本目录布局一并移除：覆盖式升级（decisions.md D5）
-// 下安装路径恒定，无 current 软链切换。
 
 // ServiceManifest 是安装包的说明文档（service manifest）。
 // 字段与市场目录条目同构：一份 schema 两处消费（打包随包分发 / 市场镜像）。
@@ -83,10 +64,9 @@ type ServiceManifest struct {
 	WebUrl        string            `json:"webUrl"`
 	Ports         []int             `json:"ports"` // 冲突预检
 	MinDiskMB     int               `json:"minDiskMB"`
-	Os            string            `json:"os"`                    // 目标平台 linux|windows（空=不限；预检与本机比对）
-	Arch          string            `json:"arch"`                  // 目标架构 amd64|arm|arm64（空=不限；GOARCH 命名）
-	ExternalRef   bool              `json:"externalRef,omitempty"` // 外部引用模式：产物不复制入仓，exePath 指向外部路径（调试用）
-	ExtraFiles    []string          `json:"extraFiles,omitempty"`  // 依赖文件清单（dll/so 等，与主程序同目录落盘）
+	Os            string            `json:"os"`                   // 目标平台 linux|windows（空=不限；预检与本机比对）
+	Arch          string            `json:"arch"`                 // 目标架构 amd64|arm|arm64（空=不限；GOARCH 命名）
+	ExtraFiles    []string          `json:"extraFiles,omitempty"` // 依赖文件清单（dll/so 等，与主程序同目录落盘）
 }
 
 // installOverrides 用户在 manifest 默认之上可覆盖的运行参数（安装表单）。
@@ -96,16 +76,11 @@ type installOverrides struct {
 	Enabled   *bool             `json:"enabled"`
 	AutoStart bool              `json:"autoStart"`
 	Priority  int               `json:"priority"`
-	// LocalBinary 本地已下载的包文件（可选）：安装时复制为版本目录内产物
-	//（手动创建的"本地文件入仓"模式同用此字段）。
+	// LocalBinary 已上传主程序的暂存路径。安装时复制进服务目录。
 	LocalBinary string `json:"localBinary"`
-	// ExternalPath 外部引用路径（可选，调试用）：产物不复制入仓，
-	// exePath 直接指向该路径；manifest 标记 externalRef 留档。
-	ExternalPath string `json:"externalPath"`
-	// ExtraBinaries 依赖文件暂存路径（dll/so/静态库等）：复制到与主程序同目录。
+	// ExtraBinaries 依赖文件暂存路径（dll/so 等），复制到 dependencies/。
 	ExtraBinaries []string `json:"extraBinaries"`
-	// InitialConfig 初始配置文件暂存路径（可选）：复制到版本目录 conf/，
-	// 并自动填 configFile.path；启动参数可用相对路径 conf/{name} 引用。
+	// InitialConfig 初始配置暂存路径。复制到 config/，并写入 configFile.path。
 	InitialConfig string `json:"initialConfig"`
 }
 
@@ -374,18 +349,12 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── 落盘：{root}/{name}/ + manifest.json 留存（扁平布局，覆盖式升级）──
+	// ── 落盘：{root}/{name}/ + manifest.json（扁平布局）──
 	source := strings.TrimSpace(req.Source)
 	if source == "" {
 		source = "market"
 	}
-	// 外部引用模式（exePath 指向包外任意路径）已移除：等价于任意命令执行向量，
-	// 且 localBinary 已覆盖「自备二进制」场景——直接拒绝，不落任何文件。
-	if ext := strings.TrimSpace(req.Overrides.ExternalPath); ext != "" {
-		fail(w, http.StatusBadRequest, "externalPath 已禁用，请改用 localBinary 提供产物")
-		return
-	}
-	// 覆盖式升级（decisions.md D5/P1）：安装目录不含版本层，路径恒定；
+	// 安装目录不含版本层，路径恒定；
 	// 服务运行数据在 data/{name}（P2），与产物目录彻底分离。
 	dir := filepath.Join(s.installRoot(), m.Name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -402,7 +371,7 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	binPath := filepath.Join(dir, m.Binary)
-	// 产物入仓：确保 bin 子目录存在（复制/占位写入前）。
+	// 确保 bin 子目录存在。
 	if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
 		s.rollbackInstallDir(dir)
 		fail(w, http.StatusInternalServerError, "创建产物目录失败: "+err.Error())
@@ -416,18 +385,17 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	default:
-		// 无本地包产物：安装包应由升级管线（M2）提供。此处不再写入占位 stub
-		// 冒充二进制——那会让安装「看似成功、启动必然失败」，现场极难排查。
-		// 显式拒绝，让调用方明确知道缺产物。
+		// 没有上传主程序，也不接受用空文件冒充二进制。
+		// .cairnpkg 安装走 /upgrade/local 或 /upgrade/apply。
 		if _, err := os.Stat(binPath); err != nil {
 			s.rollbackInstallDir(dir)
 			fail(w, http.StatusBadRequest,
-				"缺少安装产物：未提供 localBinary，且包内未包含 "+m.Binary+"（升级管线将在 M2 提供）")
+				"缺少安装产物：未提供 localBinary，且目录内没有 "+m.Binary+"。整包请走升级入口")
 			return
 		}
 	}
 
-	// ── 依赖文件：复制到版本目录 dependencies/（与 bin/ 平级，启动参数可用
+	// ── 依赖文件：复制到 dependencies/（与 bin/ 平级，启动参数可用
 	//    相对路径 dependencies/xxx.dll 引用；Windows DLL 如需自动加载，
 	//    可在环境变量中追加 PATH=dependencies）──
 	depDir := filepath.Join(dir, "dependencies")
@@ -447,7 +415,7 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 		}
 		m.ExtraFiles = append(m.ExtraFiles, filepath.Base(extra))
 	}
-	// ── 初始配置文件：复制到版本目录 config/ 并自动填 configFile.path ──
+	// ── 初始配置文件：复制到 config/ 并自动填 configFile.path ──
 	cfgPath := ""
 	if cfg := strings.TrimSpace(req.Overrides.InitialConfig); cfg != "" {
 		confDir := filepath.Join(dir, "config")
@@ -470,32 +438,17 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 	// 产生的 .db/.log 等过程文件不受影响（decisions.md E2/P2）。
 	m.WorkDir = config.DataDir(m.Name)
 
-	// ── 依赖名 → id ──
-	dependsOn := make([]int, 0, len(m.Deps))
-	for _, dep := range m.Deps {
-		var d store.Service
-		if err := s.DB.First(&d, "name = ?", dep).Error; err == nil {
-			dependsOn = append(dependsOn, d.ID)
-		}
-	}
-
-	// ── 依赖环检测（写路径防御）──
-	// 安装是前端唯一的新建入口，必须在此拦截：仅靠 SaveService 的检测
-	// 管不住 manifest.Deps 互相依赖形成的环（会把 DAG 拓扑序打乱）。
-	if len(dependsOn) > 0 {
-		var all []store.Service
-		s.DB.Order("id asc").Find(&all)
-		if cycle := detectDependsCycle(all, 0, dependsOn); cycle != "" {
-			s.rollbackInstallDir(dir)
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"code": http.StatusBadRequest,
-				"msg":  "依赖形成环：" + cycle,
-				"issues": []installIssue{
-					{"error", "deps", "依赖成环：" + cycle},
-				},
-			})
-			return
-		}
+	dependsOn, depErr := s.resolveDeps(m.Deps, 0)
+	if depErr != nil {
+		s.rollbackInstallDir(dir)
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"code": http.StatusBadRequest,
+			"msg":  depErr.Error(),
+			"issues": []installIssue{
+				{"error", "deps", depErr.Error()},
+			},
+		})
+		return
 	}
 
 	// ── Service 定义（统一 managed：无 unitName，全由平台定义） ──
@@ -519,10 +472,10 @@ func (s *Server) InstallService(w http.ResponseWriter, r *http.Request) {
 	def.RestartPolicy, def.HealthCheck, def.ConfigFile, def.LogPolicy = defaultPolicyBlobs()
 	if cfgPath != "" {
 		// 上传的初始配置自动接管 configFile.path（M3 编辑/校验/生效链路的锚点）。
-		def.ConfigFile = mustJSON(map[string]any{"path": cfgPath, "validateCmd": "", "applyMode": "restart", "applyCmd": "", "maxHistory": 10})
+		def.ConfigFile = configFileBlob(cfgPath)
 	}
 	if len(m.RestartPolicy) > 0 && string(m.RestartPolicy) != "null" {
-		def.RestartPolicy = datatypesJSON(m.RestartPolicy)
+		def.RestartPolicy = datatypesJSON(coerceRestartPolicy(m.RestartPolicy))
 	}
 	if len(m.HealthCheck) > 0 && string(m.HealthCheck) != "null" {
 		def.HealthCheck = datatypesJSON(m.HealthCheck)
@@ -642,13 +595,13 @@ func synthesizeManifest(def store.Service) ServiceManifest {
 	return m
 }
 
-// rollbackInstallDir 安装失败时尽力清理本次创建的版本目录，
-// 避免「目录已落盘但 DB 无记录」的残留（会导致重装时名称冲突预检失败）。
+// rollbackInstallDir 安装失败时清理本次创建的服务目录，
+// 避免「目录已落盘但 DB 无记录」挡住重装。
 func (s *Server) rollbackInstallDir(dir string) {
 	if dir == "" {
 		return
 	}
-	// 仅清理版本目录本身；不触碰 services 根，避免误删既有服务。
+	// 只删本次目录，不触碰 services 根。
 	if err := os.RemoveAll(dir); err != nil {
 		logx.Module("api").Warn("回滚安装目录失败", "dir", dir, "err", err)
 	}

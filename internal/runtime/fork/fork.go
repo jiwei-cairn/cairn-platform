@@ -124,18 +124,6 @@ func (r *Runtime) RemoveUnit(name string) error {
 	return nil
 }
 
-// SetEnabled 登记位翻转（开机自启语义在 supervisor/编排层，这里只记台账）。
-func (r *Runtime) SetEnabled(name string, enabled bool) error {
-	u := r.get(name)
-	if u == nil {
-		return fmt.Errorf("单元不存在: %s", name)
-	}
-	u.mu.Lock()
-	u.def.Enabled = enabled
-	u.mu.Unlock()
-	return nil
-}
-
 // Start 拉起子进程：setsid（Win: 新进程组）+ env 合并 + stdout/stderr 接管。
 // fork 即活，立即返回；就绪判定（L2/readyHold）归 supervisor worker。
 func (r *Runtime) Start(name string, timeout time.Duration) error {
@@ -314,14 +302,6 @@ func (r *Runtime) Stop(name string, timeout time.Duration) error {
 	return fmt.Errorf("停止失败：进程 %d 在强杀后仍未退出", pid)
 }
 
-// Restart 重启（Stop + Start）。
-func (r *Runtime) Restart(name string, timeout time.Duration) error {
-	if err := r.Stop(name, timeout); err != nil {
-		return err
-	}
-	return r.Start(name, timeout)
-}
-
 // Status 查询进程事实：活=running；退出按退出码分 stopped/failed；无登记 notFound。
 // 平台已发起 Stop 的单元，其退出一律折叠为 stopped（强杀退出码不代表崩溃）。
 func (r *Runtime) Status(name string) (runtime.UnitStatus, error) {
@@ -345,20 +325,6 @@ func (r *Runtime) Status(name string) (runtime.UnitStatus, error) {
 		st.State = runtime.UnitStopped
 	}
 	return st, nil
-}
-
-// Pids 主进程 PID 列表（M1 最小实现：主 PID；子孙扫描留 M3 采集时）。
-func (r *Runtime) Pids(name string) ([]int, error) {
-	u := r.get(name)
-	if u == nil {
-		return nil, fmt.Errorf("单元不存在: %s", name)
-	}
-	if !u.alive() {
-		return nil, nil
-	}
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return []int{u.pid}, nil
 }
 
 // Close 关闭运行时（不再发退出事件）。

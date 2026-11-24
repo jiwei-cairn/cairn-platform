@@ -13,18 +13,14 @@ import (
 	"time"
 )
 
-// UnitState 是进程事实层面的中立状态枚举（与监管语义的九态状态机是两个
-// 层次：worker 负责把进程事实折叠进监管语义）。
+// UnitState 是进程事实层面的状态。监管语义的八态在 supervisor，
+// worker 负责把进程事实折叠进去。
 //
-// fork 实现只产生四值：running / stopped / failed / notFound（fork 即活，
-// 无 OS 级过渡态）；starting / stopping 保留给有过渡语义的实现（如备选的
-// systemd）与 fake 的惰性时间模型。
+// fork 只产生四值：running / stopped / failed / notFound。
 type UnitState string
 
 const (
 	UnitRunning  UnitState = "running"  // 进程存活（fork：Wait 未返回）
-	UnitStarting UnitState = "starting" // 过渡：启动中（fork 不产生）
-	UnitStopping UnitState = "stopping" // 过渡：停止中（fork Stop 同步等待，不产生）
 	UnitStopped  UnitState = "stopped"  // 已正常退出
 	UnitFailed   UnitState = "failed"   // 非零退出 / 被信号杀死
 	UnitNotFound UnitState = "notFound" // 无登记（从未启动或已移除）
@@ -53,27 +49,19 @@ type UnitDef struct {
 	LogPolicy []byte            // logPolicy JSON（轮转参数；fork 转交 svclog 出口）
 }
 
-// Runtime 是进程管理器抽象接口：八个生命周期原语（中立命名）。
-// 实现：fork（M1，os/exec 父子模型 + 孤儿认领，跨平台）/ fake（内存实现：
-// 单测桩 + UI 原型 mock，一物两用）。
+// Runtime 是进程管理器接口。当前唯一实现是 fork。
+// 重启由 supervisor 组合 Stop 与 Start，不在这里提供单独方法。
 type Runtime interface {
 	// EnsureUnit 幂等登记期望态并生效（fork：内存台账 + 落盘登记供认领）。
 	EnsureUnit(def UnitDef) error
 	// RemoveUnit 删除单元（停止若活 + 清除登记）。
 	RemoveUnit(name string) error
-	// SetEnabled 开机自启开关（登记位翻转）。
-	// 当前无调用方：enabled 经 EnsureUnit 的 def 更新流转，保留为实现自约束。
-	SetEnabled(name string, enabled bool) error
 	// Start 发起启动（fork 即活，立即返回；就绪判定归 supervisor worker）。
 	Start(name string, timeout time.Duration) error
 	// Stop 优雅停机（信号序列 + 宽限 = timeout + 强杀兜底），同步等待退出。
 	Stop(name string, timeout time.Duration) error
-	// Restart 重启（当前 supervisor 用 doStop+doStart 组合，不经此方法）。
-	Restart(name string, timeout time.Duration) error
 	// Status 查询进程当前状态（无登记时 State 为 UnitNotFound，不返回错误）。
 	Status(name string) (UnitStatus, error)
-	// Pids 返回主进程 + 子进程 PID 列表（采集统计用；M3 采集落地前无调用方）。
-	Pids(name string) ([]int, error)
 	// Close 释放底层资源。
 	Close()
 }

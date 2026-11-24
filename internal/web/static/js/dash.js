@@ -267,7 +267,6 @@ function renderDashServices() {
       '<td class="num-cell">' + (rt.restartTotal ?? '—') + '</td>' +
       '<td class="num-cell"' + cpuDanger + '>' + fmtPct(rt.cpuPct) + '</td>' +
       '<td class="num-cell"' + memDanger + '>' + fmtMB(rt.memMB) + '</td>' +
-      '<td class="num-cell">↓' + fmtKBps(rt.netRxKBps) + ' ↑' + fmtKBps(rt.netTxKBps) + '</td>' +
       '<td class="text-end"><button class="btn btn-outline-secondary btn-sm" onclick="goServiceDetail(' + s.id + ')">查看</button></td>' +
       '</tr>';
   }).join('');

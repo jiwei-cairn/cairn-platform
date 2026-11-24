@@ -41,8 +41,7 @@ func RunStateFrom(s supervisor.Snap) api.RunState {
 		RestartTotal: s.RestartTotal, RestartFailures: s.RestartFailures,
 		ConsecutiveFailures: s.ConsecutiveFailures,
 		HealthState:         s.HealthState, LastError: s.LastError,
-		CpuPct: s.CpuPct, MemMB: s.MemMB,
-		CpuTimeSec: s.CpuTimeSec, NetRxKB: s.NetRxKB, NetTxKB: s.NetTxKB,
+		CpuPct: s.CpuPct, MemMB: s.MemMB, CpuTimeSec: s.CpuTimeSec,
 	}
 }
 
@@ -74,8 +73,6 @@ func (a StatsAdapter) Series(serviceID int) (api.StatsView, bool) {
 		UptimeSec:    rt.UptimeSec,
 		RestartTotal: rt.RestartTotal,
 		CpuTimeSec:   rt.CpuTimeSec,
-		NetRxKB:      rt.NetRxKB,
-		NetTxKB:      rt.NetTxKB,
 		Cpu:          cpu,
 		Mem:          mem,
 	}, true
