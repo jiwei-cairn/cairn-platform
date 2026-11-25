@@ -284,28 +284,36 @@ OTA 升级采用 **HTTP(S) 静态文件托管 + Pull 模式**。服务器只需�
 
 **用法**：把 `{server_root}` 指向本地目录，起 httpd 指向它，设备配置 `ota.baseUrl` 为本机 IP。
 
-### 方式二：仓库内 Go devserver（推荐用于系统测试）
+### 方式二：cairn-hub 本地实例（推荐用于系统测试）
 
-建议在 `cmd/devserver` 提供一个开发服务器：
+> 原仓库内 `cmd/devserver` 已移除，其能力由独立仓库 **cairn-hub** 承接（Phase 1+，含认证发布与清单签名；设备侧目录结构不变）。
 
 ```
-GET  /cairn/**              静态托管（支持 Range）
-POST /cairn/dev/publish     上传新包并自动更新 index.json（造数据用）
-GET  /cairn/dev/fault/{mode}  故障注入：
-                               · bad-hash       返回哈希不符的清单
-                               · corrupt-pkg    返回截断的包
-                               · slow           限速响应
-                               · 500            返回服务器错误
+GET  /cairn/**          静态托管（原生 Range 断点续传）
+POST /publish           上传 .cairnpkg → 验包 → 落位 → 自动重扫 index.json
+POST /rescan            手动重建三份 index.json
+故障注入（附加在任意 /cairn 请求上）:
+     ?fault=bad-hash    清单返回错误的 sha256
+     ?fault=corrupt     包响应被截断
+     ?fault=slow        限速响应
+     ?fault=500         返回服务器错误
 ```
 
-**为什么需要 devserver**：MobaXterm 无法模拟失败路径，而升级功能的质量主要取决于**失败处理**是否正确。仅有成功路径的验证不足以说明可靠。
+**用法**（详见 cairn-hub 仓库 README）：
+
+```bash
+./cairn-hub -root ./ota-root -addr :8090 -data ./hub-data
+# 仅验证业务流程（平台暂未接入凭证）：make run-anon（-anon-publish，生产禁止）
+```
+
+**为什么需要本地服务器**：MobaXterm 无法模拟失败路径，而升级功能的质量主要取决于**失败处理**是否正确。仅有成功路径的验证不足以说明可靠。
 
 ### 两种方式的定位
 
 | 方式 | 定位 |
 |---|---|
 | MobaXterm | 快速验证「网络通不通、清单能否拉到」 |
-| Go devserver | 系统测试：Range、故障注入、边界条件 |
+| cairn-hub | 系统测试：Range、故障注入、边界条件；亦是生产发布/市场服务端 |
 
 **两者不冲突**，可先后使用。
 

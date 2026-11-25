@@ -67,7 +67,7 @@ func (s *Server) SuitePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// hub 能力探测（复用 probeHub：旧二进制/匿名模式提前拦截）。
-	if err := probeHub(cleanOtaBase(base)); err != nil {
+	if err := probeHub(cleanOtaBase(base), cfg.OTA.AccessCert); err != nil {
 		fail(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -138,7 +138,7 @@ func (s *Server) SuitePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── 上传 hub /publish-product ──
-	res, err := uploadSuiteToHub(cleanOtaBase(base), buf.Bytes(), req.Name, req.Version)
+	res, err := uploadSuiteToHub(cleanOtaBase(base), buf.Bytes(), req.Name, req.Version, cfg.OTA.AccessCert)
 	if err != nil {
 		var he *hubHTTPError
 		if errors.As(err, &he) {
@@ -177,7 +177,7 @@ func buildProductZip(m *pack.ProductManifest) (*bytes.Buffer, error) {
 
 // uploadSuiteToHub multipart 上传 .cairnproduct 到 hub /publish-product。
 // 返回 hub 响应的 data 字段（发布结果）。
-func uploadSuiteToHub(base string, body []byte, name, version string) (json.RawMessage, error) {
+func uploadSuiteToHub(base string, body []byte, name, version, certJSON string) (json.RawMessage, error) {
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
 	go func() {
@@ -196,6 +196,7 @@ func uploadSuiteToHub(base string, body []byte, name, version string) (json.RawM
 		return nil, err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
+	applyHubCert(req, certJSON)
 
 	client := &http.Client{Timeout: publishUploadTimeout}
 	resp, err := client.Do(req)

@@ -1,12 +1,11 @@
-// publish.go — 服务发布到服务端（业务流程验证版：暂无认证）。
+// publish.go — 服务发布到服务端。
 //
-// 流程（Phase 3a 的验证切片）：
-//  1. buildExportPackage：当前安装态打成 .cairnpkg（与 D9 导出同源）；
-//  2. uploadToHub：multipart 流式上传到 {ota.serverUrl}/publish；
+// 流程：
+//  1. buildExportPackage：当前安装态打成 .cairnpkg；
+//  2. uploadToHub：multipart 上传到 {ota.serverUrl}/publish，带上已导入的准入证书；
 //  3. 返回 hub 的落位结果（sha256 / canonical / idempotent）。
 //
-// 认证：平台身份证书 + 请求签名随 Phase 3a 凭证管理接入；当前 hub 需以
-// -anon-publish 启动（hub 侧显式匿名开关，生产禁止）。
+// hub 默认校验证书。未导入证书时，只有 hub 以 -anon-publish 启动才能发布。
 package api
 
 import (
@@ -38,12 +37,12 @@ const hubAPIVersion = 1
 
 // probeHub 发布前探测服务端能力：识别「连到旧版二进制」这一常见故障。
 //
-// 背景：Phase 0 的 cairn-hub（种子版）与 cairn-platform 的 cmd/devserver
+// 背景：Phase 0 的 cairn-hub（种子版）与原仓库内 cmd/devserver（已移除）
 // 返回纯文本 "published: …"，Phase 1 起才是 {code,data} 信封。仅凭端口与
 // 地址无法区分，旧二进制只会让发布失败于「响应解析失败: invalid character 'p'」。
 // 探针拿不到 healthz（超时/404/非 JSON）时不阻断——可能是反向代理只放行了
 // /publish，那不是版本问题；探测失败交由实际上传给出准确错误。
-func probeHub(base string) error {
+func probeHub(base, certJSON string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(base + "/healthz")
 	if err != nil {
@@ -70,9 +69,8 @@ func probeHub(base string) error {
 		return fmt.Errorf("服务端发布协议版本过旧（对端 apiVersion=%d，本平台需要 %d）；请重新构建 cairn-hub 后重启",
 			health.APIVersion, hubAPIVersion)
 	}
-	if health.Anonymous != nil && !*health.Anonymous {
-		return fmt.Errorf("服务端已开启发布认证，而当前平台尚未接入凭证（Phase 3a）；" +
-			"验证业务流程期间请以 -anon-publish 启动 cairn-hub（生产环境禁止）")
+	if health.Anonymous != nil && !*health.Anonymous && strings.TrimSpace(certJSON) == "" {
+		return fmt.Errorf("服务端要求准入证书。请在设置 → 远程升级中导入 hub 签发的证书")
 	}
 	return nil
 }
@@ -100,7 +98,7 @@ func (s *Server) PublishService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 能力探测：把「连到旧二进制 / 未开匿名」这两类配置问题在上传前说清楚。
-	if err := probeHub(cleanOtaBase(base)); err != nil {
+	if err := probeHub(cleanOtaBase(base), cfg.OTA.AccessCert); err != nil {
 		fail(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -112,7 +110,7 @@ func (s *Server) PublishService(w http.ResponseWriter, r *http.Request) {
 	}
 	defer os.Remove(pkgPath)
 
-	res, err := uploadToHub(base, pkgPath)
+	res, err := uploadToHub(base, pkgPath, cfg.OTA.AccessCert)
 	if err != nil {
 		var he *hubHTTPError
 		if errors.As(err, &he) {
@@ -121,10 +119,7 @@ func (s *Server) PublishService(w http.ResponseWriter, r *http.Request) {
 				fail(w, http.StatusConflict, err.Error()) // 冲突透传（版本已存在且内容不同）
 				return
 			case http.StatusUnauthorized, http.StatusForbidden:
-				// 认证缺口是当前阶段最常见的一类失败：给出可操作指引，
-				// 而非把 hub 的裸 401 文案直接抛给使用者。
-				fail(w, he.code, fmt.Sprintf("%s；服务端已开启发布认证，"+
-					"验证业务流程期间请以 -anon-publish 启动 cairn-hub（生产环境禁止）", err.Error()))
+				fail(w, he.code, err.Error()+"。请确认设置中导入的是本枢纽当前签发的证书")
 				return
 			}
 		}
@@ -150,7 +145,7 @@ func (e *hubHTTPError) Error() string {
 
 // uploadToHub 把本地包 multipart 流式上传到 hub /publish（无认证版）。
 // 返回 hub 响应中的 data 字段（发布结果 JSON：name/version/canonical/sha256/sizeBytes/idempotent）。
-func uploadToHub(baseURL, pkgPath string) (json.RawMessage, error) {
+func uploadToHub(baseURL, pkgPath, certJSON string) (json.RawMessage, error) {
 	base := cleanOtaBase(baseURL)
 	if base == "" {
 		return nil, fmt.Errorf("远程服务器未配置")
@@ -181,6 +176,7 @@ func uploadToHub(baseURL, pkgPath string) (json.RawMessage, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
+	applyHubCert(req, certJSON)
 
 	client := &http.Client{Timeout: publishUploadTimeout}
 	resp, err := client.Do(req)

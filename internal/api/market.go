@@ -8,9 +8,8 @@
 // 安装状态由前端 join 本地服务列表（market.js marketJoined），后端只管目录。
 // 目录条目兼作安装 manifest（前端 openInstallModal 直接 POST /services/install）。
 //
-// 认证演进：本阶段与设备拉取同通道（静态、无鉴权——该数据本就对拉取端公开，
-// 包的完整性由 sha256 + 内容签名保证）。market scope 的认证读取随 Phase 3a
-// 凭证管理接入（hub 侧 /market 端点包一层）。
+// 市场下载走 hub 的 /v1/market/**，请求带已导入的准入证书。
+// 设备远程升级仍读公开的 /cairn/**，不使用这张证书。
 package api
 
 import (
@@ -50,7 +49,11 @@ func (s *Server) MarketCatalog(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "尚未配置远程服务器（设置 → 远程升级 → 服务器地址）")
 		return
 	}
-	idx, err := fetchServicesIndex(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec)
+	if strings.TrimSpace(cfg.OTA.AccessCert) == "" {
+		fail(w, http.StatusConflict, "请先在设置中导入 hub 签发的证书")
+		return
+	}
+	idx, err := fetchServicesIndexFrom(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec, "/v1/market", cfg.OTA.AccessCert)
 	if err != nil {
 		fail(w, http.StatusBadGateway, "市场目录拉取失败: "+err.Error())
 		return
@@ -117,7 +120,11 @@ func (s *Server) MarketProducts(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "尚未配置远程服务器（设置 → 远程升级 → 服务器地址）")
 		return
 	}
-	pi, err := fetchProductsIndex(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec)
+	if strings.TrimSpace(cfg.OTA.AccessCert) == "" {
+		fail(w, http.StatusConflict, "请先在设置中导入 hub 签发的证书")
+		return
+	}
+	pi, err := fetchProductsIndexFrom(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec, "/v1/market", cfg.OTA.AccessCert)
 	if err != nil {
 		fail(w, http.StatusBadGateway, "产品套件拉取失败: "+err.Error())
 		return
@@ -145,6 +152,10 @@ func (s *Server) MarketProducts(w http.ResponseWriter, r *http.Request) {
 
 // fetchProductsIndex 拉根索引 → 产品清单（URL 相对解析，G3/G7；镜像 fetchServicesIndex）。
 func fetchProductsIndex(baseURL string, timeoutSec int) (*pack.ProductsIndex, error) {
+	return fetchProductsIndexFrom(baseURL, timeoutSec, "/cairn", "")
+}
+
+func fetchProductsIndexFrom(baseURL string, timeoutSec int, prefix, certJSON string) (*pack.ProductsIndex, error) {
 	base := cleanOtaBase(baseURL)
 	if base == "" {
 		return nil, fmt.Errorf("OTA 服务器未配置")
@@ -154,7 +165,7 @@ func fetchProductsIndex(baseURL string, timeoutSec int) (*pack.ProductsIndex, er
 	}
 	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
 
-	rootData, rootURL, err := httpGetJSON(client, base+"/cairn/index.json")
+	rootData, rootURL, err := httpGetJSON(client, base+prefix+"/index.json", certJSON)
 	if err != nil {
 		return nil, fmt.Errorf("拉取根索引失败: %w", err)
 	}
@@ -162,7 +173,7 @@ func fetchProductsIndex(baseURL string, timeoutSec int) (*pack.ProductsIndex, er
 	if err != nil {
 		return nil, err
 	}
-	prodData, _, err := httpGetJSON(client, resolveRel(rootURL, root.Domains.Products.Index))
+	prodData, _, err := httpGetJSON(client, resolveRel(rootURL, root.Domains.Products.Index), certJSON)
 	if err != nil {
 		return nil, fmt.Errorf("拉取产品清单失败: %w", err)
 	}

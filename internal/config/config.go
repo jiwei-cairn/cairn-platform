@@ -173,8 +173,9 @@ func rootJoin(head string, parts ...string) string {
 // OTA 远程升级（Pull 模式，静态文件托管，decisions.md B1-B8）。
 // 服务器目录规范见 docs/upgrade/ota-server.md。
 type OTA struct {
-	ServerURL  string `json:"serverUrl"`  // 服务器基址，如 http://192.168.1.10:8090；空 = 未启用 OTA（出厂默认）
-	TimeoutSec int    `json:"timeoutSec"` // 拉清单/下载超时（5–120s）
+	ServerURL  string `json:"serverUrl"`            // 服务器基址，如 http://192.168.1.10:8090；空 = 未启用 OTA（出厂默认）
+	TimeoutSec int    `json:"timeoutSec"`           // 拉清单/下载超时（5–120s）
+	AccessCert string `json:"accessCert,omitempty"` // hub 签发的准入证书 JSON。设置页导入，不随普通表单回显
 }
 
 // Web 平台 Web 服务。

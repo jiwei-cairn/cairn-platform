@@ -199,9 +199,12 @@
 
       <!-- ═══════════ ◆ section-market 市场 ═══════════ -->
       <section id="section-market" class="app-section d-none">
-        <div class="section-header">
-          <h4><i class="bi bi-shop me-2" style="color:var(--primary)"></i>市场</h4>
-          <div class="sub">微服务目录与产品套件 · 标签筛选 · 瀑布流展示</div>
+        <div class="section-header section-header-row">
+          <div>
+            <h4><i class="bi bi-shop me-2" style="color:var(--primary)"></i>市场</h4>
+            <div class="sub">微服务目录与产品套件 · 标签筛选 · 瀑布流展示</div>
+          </div>
+          <button class="btn btn-outline-secondary text-nowrap" id="market-refresh" type="button" onclick="refreshMarket(this)"><i class="bi bi-arrow-clockwise me-1"></i>刷新</button>
         </div>
 
         <!-- 顶部 Tab -->
@@ -294,6 +297,15 @@
               <label for="set-ota-timeout">超时（秒）</label>
               <input type="number" class="form-control" id="set-ota-timeout" placeholder="30">
               <div class="invalid-feedback">超时需在 5–120 秒</div>
+            </div>
+            <div class="settings-field">
+              <label for="set-hub-cert">准入证书</label>
+              <div class="d-flex align-items-center gap-2">
+                <input type="file" class="form-control form-control-sm" id="set-hub-cert" accept=".json,application/json">
+                <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" onclick="importHubCert()">导入</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" onclick="clearHubCert()">移除</button>
+              </div>
+              <div class="form-text" id="set-hub-cert-status">未导入。导入后可发布软件、发布产品，并下载市场内容。</div>
             </div>
           </div>
 

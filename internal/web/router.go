@@ -104,6 +104,8 @@ func Router(s *api.Server) http.Handler {
 		r.Get("/settings", s.GetSettings)
 		r.Post("/settings", s.SaveSettings)
 		r.Put("/settings", s.SaveSettings)
+		r.Post("/settings/hub-cert", s.ImportHubCert)
+		r.Delete("/settings/hub-cert", s.ClearHubCert)
 	})
 
 	sub, _ := fs.Sub(staticFS, "static")

@@ -26,6 +26,22 @@ async function marketEnter() {
 }
 function marketLeave() { /* 无轮询，无需清理 */ }
 
+/* 右上角刷新：重新拉取 hub 目录与产品，并更新本机安装状态。 */
+async function refreshMarket(btnEl) {
+  if (btnEl) btnBusy(btnEl, '刷新中…');
+  try {
+    await Promise.all([loadMarket(), loadServices(true)]);
+    renderMarketTabs();
+    renderMarketTagChips();
+    renderMarketGrid();
+    if (state.market.catalogError) showToast('danger', '市场刷新失败：' + state.market.catalogError);
+  } catch (e) {
+    showToast('danger', '市场刷新失败：' + e.message);
+  } finally {
+    if (btnEl) btnIdle(btnEl);
+  }
+}
+
 function setMarketTab(key) {
   state.market.tab = key;
   state.market.activeTags = []; /* 切 tab 清空标签筛选 */
@@ -265,7 +281,7 @@ async function doInstall() {
   const btn = el('im-confirm');
   btnBusy(btn, '提交安装…');
   try {
-    const r = await apiPost('/upgrade/apply', { name: m.name });
+    const r = await apiPost('/upgrade/apply', { name: m.name, channel: 'market' });
     installModal.hide();
     /* 复用升级任务的弹窗/横幅/轮询；mode=install 时管线走安装分支
      * （无停服阶段，swapping 阶段映射到「安装」）。 */
@@ -308,7 +324,7 @@ async function installSuite(items) {
   for (const m of items) {
     if (state.services.some(s => s.name === m.name)) { skipped++; continue; }
     try {
-      const r = await apiPost('/upgrade/apply', { name: m.name });
+      const r = await apiPost('/upgrade/apply', { name: m.name, channel: 'market' });
       const ok = await waitUpgradeTaskDone(r.taskId);
       if (!ok) { failed = { name: m.name, msg: '部署任务失败' }; break; }
       done++;

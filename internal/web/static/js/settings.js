@@ -71,7 +71,40 @@ function fillSettingsForm(st) {
   SET_TEXT.forEach(([path, id]) => setVal(id, getPath(st, path) ?? ''));
   SET_SELECT.forEach(([path, id]) => setVal(id, getPath(st, path) ?? ''));
   SET_BOOL.forEach(([path, id]) => setChecked(id, !!getPath(st, path)));
+  const certStatus = el('set-hub-cert-status');
+  if (certStatus) {
+    certStatus.textContent = st.certImported
+      ? '已导入。发布软件、发布产品和市场下载会携带此证书。'
+      : '未导入。导入后可发布软件、发布产品，并下载市场内容。';
+  }
   clearSetInvalid();
+}
+
+async function importHubCert() {
+  const input = el('set-hub-cert');
+  const file = input && input.files && input.files[0];
+  if (!file) { showToast('warning', '请选择 hub 签发的证书文件'); return; }
+  let text = '';
+  try { text = await file.text(); } catch (e) { showToast('danger', '读取证书失败：' + e.message); return; }
+  try {
+    const res = await apiReq('/settings/hub-cert', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text,
+    });
+    showToast('success', '证书已导入' + (res && res.platformId ? '：' + res.platformId : ''));
+    await loadSettingsPage();
+  } catch (e) {
+    showToast('danger', '导入失败：' + e.message);
+  }
+}
+
+async function clearHubCert() {
+  try {
+    await apiDelete('/settings/hub-cert');
+    showToast('info', '已移除准入证书');
+    await loadSettingsPage();
+  } catch (e) {
+    showToast('danger', '移除失败：' + e.message);
+  }
 }
 function fillAboutCard() {
   const v = state.version || {};
