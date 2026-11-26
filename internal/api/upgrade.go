@@ -23,10 +23,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jiwei-cairn/cairn-pkg/pack"
 	"github.com/jiwei-cairn/cairn-platform/internal/assets"
 	"github.com/jiwei-cairn/cairn-platform/internal/config"
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
+	"github.com/jiwei-cairn/cairn-platform/internal/pack"
 	"github.com/jiwei-cairn/cairn-platform/internal/store"
 
 	"github.com/go-chi/chi/v5"
@@ -285,8 +285,11 @@ func (s *Server) UpgradeCheck(w http.ResponseWriter, r *http.Request) {
 
 	var idx *pack.ServicesIndex
 	if out.Enabled {
-		i, err := fetchServicesIndex(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec)
-		if err != nil {
+		cred := hubCredFrom(cfg.OTA)
+		if !cred.configured() {
+			logx.Module("api").Warn("远程升级未填写 Hub 用户名和口令，回落内置清单")
+			out.Offline = true
+		} else if i, err := fetchServicesIndex(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec, cred); err != nil {
 			logx.Module("api").Warn("OTA 清单拉取失败，回落内置清单", "err", err)
 			out.Offline = true
 		} else {
@@ -340,11 +343,11 @@ func cleanOtaBase(raw string) string {
 }
 
 // fetchServicesIndex 拉根索引 → 服务清单（URL 相对解析，G3/G7）。
-func fetchServicesIndex(baseURL string, timeoutSec int) (*pack.ServicesIndex, error) {
-	return fetchServicesIndexFrom(baseURL, timeoutSec, "/cairn", "")
+func fetchServicesIndex(baseURL string, timeoutSec int, cred hubCred) (*pack.ServicesIndex, error) {
+	return fetchServicesIndexFrom(baseURL, timeoutSec, "/cairn", cred)
 }
 
-func fetchServicesIndexFrom(baseURL string, timeoutSec int, prefix, certJSON string) (*pack.ServicesIndex, error) {
+func fetchServicesIndexFrom(baseURL string, timeoutSec int, prefix string, cred hubCred) (*pack.ServicesIndex, error) {
 	base := cleanOtaBase(baseURL)
 	if base == "" {
 		return nil, fmt.Errorf("OTA 服务器未配置")
@@ -354,7 +357,7 @@ func fetchServicesIndexFrom(baseURL string, timeoutSec int, prefix, certJSON str
 	}
 	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
 
-	rootData, rootURL, err := httpGetJSON(client, base+prefix+"/index.json", certJSON)
+	rootData, rootURL, err := httpGetJSON(client, base+prefix+"/index.json", cred)
 	if err != nil {
 		return nil, fmt.Errorf("拉取根索引失败: %w", err)
 	}
@@ -362,20 +365,20 @@ func fetchServicesIndexFrom(baseURL string, timeoutSec int, prefix, certJSON str
 	if err != nil {
 		return nil, err
 	}
-	svcData, _, err := httpGetJSON(client, resolveRel(rootURL, root.Domains.Services.Index), certJSON)
+	svcData, _, err := httpGetJSON(client, resolveRel(rootURL, root.Domains.Services.Index), cred)
 	if err != nil {
 		return nil, fmt.Errorf("拉取服务清单失败: %w", err)
 	}
 	return pack.ParseServicesIndex(svcData)
 }
 
-// httpGetJSON GET 并返回 body 与最终 URL。certJSON 非空时附带准入证书。
-func httpGetJSON(client *http.Client, u, certJSON string) ([]byte, *url.URL, error) {
+// httpGetJSON GET 并返回 body 与最终 URL。cred 配好时附带业务账户。
+func httpGetJSON(client *http.Client, u string, cred hubCred) ([]byte, *url.URL, error) {
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	applyHubCert(req, certJSON)
+	cred.apply(req)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, nil, err
@@ -408,7 +411,8 @@ func resolveRel(base *url.URL, ref string) string {
 func (s *Server) UpgradeApply(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name    string `json:"name"`
-		Channel string `json:"channel"` // market：带准入证书，从 /v1/market 下载
+		Version string `json:"version"` // 非空时安装这一版（套件锁定）；空则取本机平台最新版
+		Channel string `json:"channel"` // market：公开市场，从 /v1/market 下载；空则走需认证的 /cairn
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
 		fail(w, http.StatusBadRequest, "请求体需要 {name}")
@@ -420,48 +424,68 @@ func (s *Server) UpgradeApply(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "OTA 服务器未配置（设置 → 远程升级）")
 		return
 	}
-	prefix, cert := "/cairn", ""
+	prefix := "/cairn"
+	cred := hubCred{}
 	if req.Channel == "market" {
-		cert = strings.TrimSpace(cfg.OTA.AccessCert)
-		if cert == "" {
-			fail(w, http.StatusConflict, "请先在设置中导入 hub 签发的证书")
+		prefix = "/v1/market"
+	} else {
+		cred = hubCredFrom(cfg.OTA)
+		if !cred.configured() {
+			fail(w, http.StatusConflict, "请在设置 → 远程升级服务器中填写用户名和口令")
 			return
 		}
-		prefix = "/v1/market"
 	}
-	idx, err := fetchServicesIndexFrom(base, cfg.OTA.TimeoutSec, prefix, cert)
+	idx, err := fetchServicesIndexFrom(base, cfg.OTA.TimeoutSec, prefix, cred)
 	if err != nil {
 		fail(w, http.StatusBadGateway, "拉取清单失败: "+err.Error())
 		return
 	}
-	entry := idx.LatestFor(req.Name, goruntime.GOOS, goruntime.GOARCH)
+	want := strings.TrimSpace(req.Version)
+	entry := selectIndexEntry(idx, strings.TrimSpace(req.Name), want, goruntime.GOOS, goruntime.GOARCH)
 	if entry == nil {
-		fail(w, http.StatusNotFound, "清单中找不到该服务在本机平台的包")
+		if want != "" {
+			fail(w, http.StatusNotFound, fmt.Sprintf("清单中找不到 %s %s 在本机平台的包", req.Name, want))
+		} else {
+			fail(w, http.StatusNotFound, "清单中找不到该服务在本机平台的包")
+		}
 		return
 	}
 
-	// 版本门控：仅当清单版本「严格大于」当前版本才允许升级（等于/低于均拒绝）；
-	// 回退到旧版本请走本地包通道（POST /upgrade/local，不做版本方向限制）。
+	// 未指定版本时只允许升到更高版本。指定版本（套件锁定）时按该版本安装，
+	// 已是这一版则不再部署。
 	var def store.Service
 	hasSvc := s.DB.First(&def, "name = ?", req.Name).Error == nil
-	if hasSvc && pack.MustCompareSemVer(entry.Version, def.Version) <= 0 {
+	if hasSvc && pack.MustCompareSemVer(entry.Version, def.Version) == 0 && want != "" {
+		ok(w, map[string]any{"skipped": true, "mode": "skip", "version": entry.Version})
+		return
+	}
+	if hasSvc && want == "" && pack.MustCompareSemVer(entry.Version, def.Version) <= 0 {
 		fail(w, http.StatusConflict, fmt.Sprintf(
 			"清单最新 %s 不高于当前版本 %s，无需升级；如需更换版本请使用本地包升级", entry.Version, def.Version))
 		return
 	}
 
+	chosen := *entry
 	srv := s
-	task := s.Tasks.Submit(modeOf(hasSvc), "ota", req.Name, svcVersionOr(hasSvc, &def), entry.Version,
+	task := s.Tasks.Submit(modeOf(hasSvc), "ota", req.Name, svcVersionOr(hasSvc, &def), chosen.Version,
 		func(ctx context.Context, t *upgradeTask) error {
-			return srv.runOtaTask(ctx, t, entry, base, prefix, cert)
+			return srv.runOtaTask(ctx, t, &chosen, base, prefix, cred)
 		})
 	ok(w, map[string]any{"taskId": task.ID, "mode": task.Mode})
 }
 
+// selectIndexEntry 按名字取包。version 非空时必须命中这一版，否则取本机平台最新版。
+func selectIndexEntry(idx *pack.ServicesIndex, name, version, osName, arch string) *pack.IndexEntry {
+	if version != "" {
+		return idx.Find(name, version, osName, arch)
+	}
+	return idx.LatestFor(name, osName, arch)
+}
+
 // runOtaTask OTA 任务：下载 → 校验 → 部署流水线。
-func (s *Server) runOtaTask(ctx context.Context, t *upgradeTask, entry *pack.IndexEntry, base, prefix, cert string) error {
+func (s *Server) runOtaTask(ctx context.Context, t *upgradeTask, entry *pack.IndexEntry, base, prefix string, cred hubCred) error {
 	s.Tasks.updatePhase(t, PhaseDownloading, entry.URL)
-	pkgPath, err := s.otaDownload(ctx, t, entry, base, prefix, cert)
+	pkgPath, err := s.otaDownload(ctx, t, entry, base, prefix, cred)
 	if err != nil {
 		return fmt.Errorf("下载失败: %w", err)
 	}
@@ -503,7 +527,7 @@ func (e *downloadError) Unwrap() error { return e.err }
 //
 // .part 生命周期：任务内跨尝试复用；跨任务同名包（四元组文件名唯一）续用残点；
 // 判定损坏即删。最终成功后改名落位。
-func (s *Server) otaDownload(ctx context.Context, t *upgradeTask, entry *pack.IndexEntry, base, prefix, cert string) (string, error) {
+func (s *Server) otaDownload(ctx context.Context, t *upgradeTask, entry *pack.IndexEntry, base, prefix string, cred hubCred) (string, error) {
 	dir := config.DataDir("upgrade-download")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -532,7 +556,7 @@ func (s *Server) otaDownload(ctx context.Context, t *upgradeTask, entry *pack.In
 			s.Tasks.updatePhase(t, PhaseDownloading,
 				fmt.Sprintf("下载中（第 %d/%d 次%s）", attempt, maxDownloadAttempts, hint))
 		}
-		_, err := s.otaDownloadOnce(ctx, entry, base, prefix, cert, part)
+		_, err := s.otaDownloadOnce(ctx, entry, base, prefix, cred, part)
 		if err == nil {
 			if err := os.Rename(part, dst); err != nil {
 				return "", err
@@ -556,7 +580,7 @@ func (s *Server) otaDownload(ctx context.Context, t *upgradeTask, entry *pack.In
 
 // otaDownloadOnce 单次下载尝试：断点续传请求 → 追加写入 → 大小与整包 sha256 校验。
 // 返回本次尝试后 .part 的字节数（诊断用）。
-func (s *Server) otaDownloadOnce(ctx context.Context, entry *pack.IndexEntry, base, prefix, cert, part string) (int64, error) {
+func (s *Server) otaDownloadOnce(ctx context.Context, entry *pack.IndexEntry, base, prefix string, cred hubCred, part string) (int64, error) {
 	cfg := s.Settings.Get()
 	timeout := cfg.OTA.TimeoutSec
 	if timeout <= 0 {
@@ -586,7 +610,7 @@ func (s *Server) otaDownloadOnce(ctx context.Context, entry *pack.IndexEntry, ba
 	if have > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", have))
 	}
-	applyHubCert(req, cert)
+	cred.apply(req)
 	// 请求绑定 ctx：任务超时取消时立刻中断下载，不留悬挂连接。
 	resp, err := client.Do(req)
 	if err != nil {

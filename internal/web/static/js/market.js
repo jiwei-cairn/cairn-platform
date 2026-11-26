@@ -298,43 +298,51 @@ async function doInstall() {
   }
 }
 
-/* ── 产品套件安装：按清单顺序逐个安装（依赖顺序由套件定义保证） ── */
+/* ── 产品套件安装：按清单锁定的版本逐个安装（依赖顺序由套件定义保证） ── */
 function openSuiteInstall(suite) {
   const catalog = state.market.catalog || [];
-  const items = (suite.services || []).map(sv => catalog.find(c => c.name === sv.name)).filter(Boolean);
+  const items = (suite.services || []).map(sv => {
+    const cat = catalog.find(c => c.name === sv.name);
+    return {
+      name: sv.name,
+      version: sv.version,
+      displayName: (cat && (cat.displayName || cat.display)) || sv.name,
+    };
+  });
   if (!items.length) { showToast('warning', '套件清单为空'); return; }
   const rows = items.map(m => {
     const svc = state.services.find(s => s.name === m.name);
     const st = svc ? (svc.enabled ? '<span class="badge badge-ok">已装 ' + escapeHtml(svc.version || '') + '</span>' : '<span class="badge badge-muted">已禁用</span>') : '<span class="badge badge-plain">未装</span>';
-    return '<li class="mt-1 d-flex align-items-center"><span class="fw-semibold">' + escapeHtml(m.displayName || m.name) + '</span><code class="ms-2">' + escapeHtml(m.version) + '</code><span class="ms-auto">' + st + '</span></li>';
+    return '<li class="mt-1 d-flex align-items-center"><span class="fw-semibold">' + escapeHtml(m.displayName || m.name) + '</span><code class="ms-2">' + escapeHtml(m.version || '未指定') + '</code><span class="ms-auto">' + st + '</span></li>';
   }).join('');
   confirmDialog({
     title: '安装产品套件 · ' + suite.name,
-    html: '将按依赖顺序安装以下 <b>' + items.length + '</b> 个微服务（manifest 默认参数，可安装后逐个调整）：<ul class="mt-2 mb-0 ps-3" style="font-size:13px;">' + rows + '</ul>' +
-      '<div class="mt-2 text-muted" style="font-size:12.5px;">已安装的条目将跳过；任一安装失败会停止后续安装。</div>',
+    html: '将按依赖顺序安装以下 <b>' + items.length + '</b> 个微服务，版本以套件清单为准：<ul class="mt-2 mb-0 ps-3" style="font-size:13px;">' + rows + '</ul>' +
+      '<div class="mt-2 text-muted" style="font-size:12.5px;">已是该版本的会跳过；版本不同的会改成清单指定版本。任一安装失败会停止后续安装。</div>',
     level: 'L1', confirmText: '开始安装',
   }).then(ok => { if (ok) installSuite(items); });
 }
 
-/* installSuite 套件安装（P0 修复）：逐个提交 OTA 安装并等待终态。
- * 服务端任务队列全局串行（D7），逐个等待让每个服务的成败可明确定位
- * （装到哪个断、装了几个，都有清楚反馈）。 */
+/* installSuite 按套件锁定版本逐个提交安装并等待终态。 */
 async function installSuite(items) {
   let done = 0, skipped = 0, failed = null;
   for (const m of items) {
-    if (state.services.some(s => s.name === m.name)) { skipped++; continue; }
+    if (!m.version) { failed = { name: m.name, msg: '套件未指定版本' }; break; }
+    const installed = state.services.find(s => s.name === m.name);
+    if (installed && installed.version === m.version) { skipped++; continue; }
     try {
-      const r = await apiPost('/upgrade/apply', { name: m.name, channel: 'market' });
+      const r = await apiPost('/upgrade/apply', { name: m.name, version: m.version, channel: 'market' });
+      if (r.skipped) { skipped++; continue; }
       const ok = await waitUpgradeTaskDone(r.taskId);
       if (!ok) { failed = { name: m.name, msg: '部署任务失败' }; break; }
       done++;
-      await loadServices(true); /* 刷新本地列表：后续条目的「跳过已装」判定要用 */
+      await loadServices(true);
       renderServiceCards();
     } catch (e) { failed = { name: m.name, msg: e.message }; break; }
   }
   renderMarketGrid();
   if (failed) showToast('warning', '套件安装中断于「' + failed.name + '」：' + failed.msg + '（已装 ' + done + ' 个）');
-  else showToast('success', '套件安装完成：新装 ' + done + ' 个，跳过已装 ' + skipped + ' 个');
+  else showToast('success', '套件安装完成：装好 ' + done + ' 个，跳过已是该版本的 ' + skipped + ' 个');
   switchSection('service');
 }
 

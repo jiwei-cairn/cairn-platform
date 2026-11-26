@@ -6,14 +6,10 @@ require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/google/uuid v1.3.0
-	github.com/jiwei-cairn/cairn-pkg v0.0.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/datatypes v1.2.1
 	gorm.io/gorm v1.25.12
 )
-
-// cairn-pkg 尚未发布：本地兄弟目录 replace（模块发布后移除，改用正式版本）。
-replace github.com/jiwei-cairn/cairn-pkg => ../cairn-pkg
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

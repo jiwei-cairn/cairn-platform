@@ -12,7 +12,11 @@ const SET_NUM = [
   ['logQuota.platformMaxMB', 'set-log-maxmb'], ['logQuota.platformMaxBackups', 'set-log-backups'], ['logQuota.retentionDays', 'set-log-days'], ['logQuota.bufferLines', 'set-log-buffer'], ['logQuota.servicesTotalMB', 'set-log-svctotal'],
   ['collect.intervalSec', 'set-collect-interval'],
 ];
-const SET_TEXT = [['ota.serverUrl', 'set-ota-server']];
+const SET_TEXT = [
+  ['ota.serverUrl', 'set-ota-server'],
+  ['ota.username', 'set-ota-user'],
+  ['ota.password', 'set-ota-password'],
+];
 const SET_SELECT = [['logQuota.level', 'set-log-level']];
 const SET_BOOL = [];
 
@@ -24,7 +28,7 @@ function setPath(obj, path, v) {
   o[keys[keys.length - 1]] = v;
 }
 const SET_FIELD_LABEL = {
-  'ota.serverUrl': '远程升级服务器', 'ota.timeoutSec': 'OTA 超时', 'web.port': 'Web 监听端口',
+  'ota.serverUrl': '远程升级服务器', 'ota.timeoutSec': 'OTA 超时', 'ota.username': 'Hub 用户名', 'web.port': 'Web 监听端口',
   'logQuota.platformMaxMB': '日志单文件上限', 'collect.intervalSec': '指标采集周期',
 };
 
@@ -71,41 +75,9 @@ function fillSettingsForm(st) {
   SET_TEXT.forEach(([path, id]) => setVal(id, getPath(st, path) ?? ''));
   SET_SELECT.forEach(([path, id]) => setVal(id, getPath(st, path) ?? ''));
   SET_BOOL.forEach(([path, id]) => setChecked(id, !!getPath(st, path)));
-  const certStatus = el('set-hub-cert-status');
-  if (certStatus) {
-    certStatus.textContent = st.certImported
-      ? '已导入。发布软件、发布产品和市场下载会携带此证书。'
-      : '未导入。导入后可发布软件、发布产品，并下载市场内容。';
-  }
   clearSetInvalid();
 }
 
-async function importHubCert() {
-  const input = el('set-hub-cert');
-  const file = input && input.files && input.files[0];
-  if (!file) { showToast('warning', '请选择 hub 签发的证书文件'); return; }
-  let text = '';
-  try { text = await file.text(); } catch (e) { showToast('danger', '读取证书失败：' + e.message); return; }
-  try {
-    const res = await apiReq('/settings/hub-cert', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text,
-    });
-    showToast('success', '证书已导入' + (res && res.platformId ? '：' + res.platformId : ''));
-    await loadSettingsPage();
-  } catch (e) {
-    showToast('danger', '导入失败：' + e.message);
-  }
-}
-
-async function clearHubCert() {
-  try {
-    await apiDelete('/settings/hub-cert');
-    showToast('info', '已移除准入证书');
-    await loadSettingsPage();
-  } catch (e) {
-    showToast('danger', '移除失败：' + e.message);
-  }
-}
 function fillAboutCard() {
   const v = state.version || {};
   setText('set-about-version', v.version || '—');
@@ -133,6 +105,9 @@ function validateSettings(s) {
   if (otaUrl !== '' && !/^https?:\/\/[A-Za-z0-9.:-]+(:[0-9]{1,5})?([\/A-Za-z0-9._\/-]*)?$/.test(otaUrl)) {
     add(idOf('ota.serverUrl'), '必须是 http:// 或 https:// 开头的基址（不含 /cairn 路径与尾斜杠）');
   }
+  const otaUser = String(s.ota.username || '').trim();
+  const otaPass = String(s.ota.password || '');
+  if ((otaUser !== '') !== (otaPass !== '')) add(idOf('ota.username'), '用户名和口令需要一起填写');
   if (!(s.ota.timeoutSec >= 5 && s.ota.timeoutSec <= 120)) add(idOf('ota.timeoutSec'), 'OTA 超时需在 5–120 秒');
   const port = (p, label) => { if (!(s[p.split('.')[0]] && s[p.split('.')[0]][p.split('.')[1]] >= 1 && s[p.split('.')[0]][p.split('.')[1]] <= 65535)) add(idOf(p), label + '需在 1–65535 之间'); };
   port('web.port', 'Web 监听端口');

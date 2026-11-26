@@ -1,15 +1,8 @@
-// market.go — 市场目录（M2-9）：hub 两份清单 → 前端市场页。
+// market.go — 市场目录：hub 公开清单 → 前端市场页。
 //
-// 数据源：hub 的静态清单（与设备 OTA 拉取同源、同通道）：
-//
-//	GET {ota.serverUrl}/cairn/services/index.json → 发现目录（按名称取本机平台最新版）
-//	GET {ota.serverUrl}/cairn/products/index.json → 产品套件
-//
-// 安装状态由前端 join 本地服务列表（market.js marketJoined），后端只管目录。
-// 目录条目兼作安装 manifest（前端 openInstallModal 直接 POST /services/install）。
-//
-// 市场下载走 hub 的 /v1/market/**，请求带已导入的准入证书。
-// 设备远程升级仍读公开的 /cairn/**，不使用这张证书。
+// 数据源是 {ota.serverUrl}/v1/market/ 下的服务清单和产品清单，不带业务账户。
+// 安装状态由前端 join 本地服务列表。单个服务和套件都走 POST /upgrade/apply，
+// channel=market。套件安装会带上清单里锁定的 version。
 package api
 
 import (
@@ -19,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jiwei-cairn/cairn-pkg/pack"
+	"github.com/jiwei-cairn/cairn-platform/internal/pack"
 
 	goruntime "runtime"
 )
@@ -49,11 +42,7 @@ func (s *Server) MarketCatalog(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "尚未配置远程服务器（设置 → 远程升级 → 服务器地址）")
 		return
 	}
-	if strings.TrimSpace(cfg.OTA.AccessCert) == "" {
-		fail(w, http.StatusConflict, "请先在设置中导入 hub 签发的证书")
-		return
-	}
-	idx, err := fetchServicesIndexFrom(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec, "/v1/market", cfg.OTA.AccessCert)
+	idx, err := fetchServicesIndexFrom(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec, "/v1/market", hubCred{})
 	if err != nil {
 		fail(w, http.StatusBadGateway, "市场目录拉取失败: "+err.Error())
 		return
@@ -120,11 +109,7 @@ func (s *Server) MarketProducts(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "尚未配置远程服务器（设置 → 远程升级 → 服务器地址）")
 		return
 	}
-	if strings.TrimSpace(cfg.OTA.AccessCert) == "" {
-		fail(w, http.StatusConflict, "请先在设置中导入 hub 签发的证书")
-		return
-	}
-	pi, err := fetchProductsIndexFrom(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec, "/v1/market", cfg.OTA.AccessCert)
+	pi, err := fetchProductsIndexFrom(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec, "/v1/market", hubCred{})
 	if err != nil {
 		fail(w, http.StatusBadGateway, "产品套件拉取失败: "+err.Error())
 		return
@@ -150,12 +135,8 @@ func (s *Server) MarketProducts(w http.ResponseWriter, r *http.Request) {
 	ok(w, out)
 }
 
-// fetchProductsIndex 拉根索引 → 产品清单（URL 相对解析，G3/G7；镜像 fetchServicesIndex）。
-func fetchProductsIndex(baseURL string, timeoutSec int) (*pack.ProductsIndex, error) {
-	return fetchProductsIndexFrom(baseURL, timeoutSec, "/cairn", "")
-}
-
-func fetchProductsIndexFrom(baseURL string, timeoutSec int, prefix, certJSON string) (*pack.ProductsIndex, error) {
+// fetchProductsIndexFrom 拉根索引 → 产品清单。prefix 为 /v1/market 或 /cairn。
+func fetchProductsIndexFrom(baseURL string, timeoutSec int, prefix string, cred hubCred) (*pack.ProductsIndex, error) {
 	base := cleanOtaBase(baseURL)
 	if base == "" {
 		return nil, fmt.Errorf("OTA 服务器未配置")
@@ -165,7 +146,7 @@ func fetchProductsIndexFrom(baseURL string, timeoutSec int, prefix, certJSON str
 	}
 	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
 
-	rootData, rootURL, err := httpGetJSON(client, base+prefix+"/index.json", certJSON)
+	rootData, rootURL, err := httpGetJSON(client, base+prefix+"/index.json", cred)
 	if err != nil {
 		return nil, fmt.Errorf("拉取根索引失败: %w", err)
 	}
@@ -173,7 +154,7 @@ func fetchProductsIndexFrom(baseURL string, timeoutSec int, prefix, certJSON str
 	if err != nil {
 		return nil, err
 	}
-	prodData, _, err := httpGetJSON(client, resolveRel(rootURL, root.Domains.Products.Index), certJSON)
+	prodData, _, err := httpGetJSON(client, resolveRel(rootURL, root.Domains.Products.Index), cred)
 	if err != nil {
 		return nil, fmt.Errorf("拉取产品清单失败: %w", err)
 	}

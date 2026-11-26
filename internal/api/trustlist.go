@@ -11,8 +11,8 @@
 //   - 公钥取自「当前配置的 OTA 服务器」的 healthz——信任锚是服务器本身
 //     （与下载包的传输通道同源）。它解决的是「无签名 vs 有签名」的空窗，
 //     不解决「服务器被入侵」——那仍需编译内置 + 轮换（§12 全量方案）。
-//   - 每次平台进程内只获取一次（幂等缓存）；获取失败按空列表处理
-//     （带签名包将被拒绝，宁可拒绝不可盲信）。
+//   - 成功取到的公钥按服务器地址缓存在本进程内。失败不缓存，下次部署会再试。
+//     带签名包在没有可用公钥时会被拒绝。
 //
 // 启用编译内置的流程：
 //  1. 服务端首次启动自动生成内容签名密钥（-data 目录），
@@ -27,11 +27,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/jiwei-cairn/cairn-pkg/pack"
-	"github.com/jiwei-cairn/cairn-pkg/trust"
+	"github.com/jiwei-cairn/cairn-platform/internal/pack"
+	"github.com/jiwei-cairn/cairn-platform/internal/trust"
 
 	"gorm.io/gorm"
 )
@@ -42,12 +43,12 @@ var trustedContentKeys = map[string]string{
 	// "content-1a2b3c4d": "MCowBQYDK2VwAyEAGx9pZ8p...",
 }
 
-// tofuContentKey 进程内 TOFU 缓存（列表为空时从 OTA 服务器获取一次）。
+// tofuContentKey 进程内 TOFU 缓存。只记住成功结果，并跟服务器地址绑定。
 type tofuKey struct {
-	mu      sync.Mutex
-	fetched bool
-	keyID   string
-	pubB64  string
+	mu     sync.Mutex
+	server string
+	keyID  string
+	pubB64 string
 }
 
 var tofu = tofuKey{}
@@ -69,7 +70,7 @@ func contentKeyRing(db *gorm.DB) (trust.KeyRing, error) {
 	if len(ring) > 0 {
 		return ring, nil
 	}
-	// TOFU：从已配置的 OTA 服务器获取内容公钥（进程内一次）。
+	// TOFU：从已配置的 OTA 服务器获取内容公钥。成功后按地址缓存。
 	if id, pubB64, ok := fetchTOFUKey(db); ok {
 		if pub, err := trust.DecodePublicKey(pubB64); err == nil {
 			ring[id] = pub
@@ -78,18 +79,9 @@ func contentKeyRing(db *gorm.DB) (trust.KeyRing, error) {
 	return ring, nil
 }
 
-// fetchTOFUKey 获取（并缓存）OTA 服务器的内容公钥。
-// db 为 nil 或未配置服务器 → false；失败 → false 且标记已尝试（不重试轰炸）。
+// fetchTOFUKey 获取 OTA 服务器的内容公钥。同一地址成功后缓存；失败不缓存，下次再试。
+// 服务器地址变了就重新获取。db 为 nil 或未配置服务器时返回 false。
 func fetchTOFUKey(db *gorm.DB) (keyID, pubB64 string, ok bool) {
-	tofu.mu.Lock()
-	defer tofu.mu.Unlock()
-	if tofu.fetched {
-		if tofu.keyID != "" {
-			return tofu.keyID, tofu.pubB64, true
-		}
-		return "", "", false
-	}
-	tofu.fetched = true // 无论成败只试一次（进程生命周期内）
 	if db == nil {
 		return "", "", false
 	}
@@ -103,11 +95,20 @@ func fetchTOFUKey(db *gorm.DB) (keyID, pubB64 string, ok bool) {
 			ServerURL string `json:"serverUrl"`
 		} `json:"ota"`
 	}
-	if err := jsonUnmarshalLenient(rec.ConfigJSON, &cfg); err != nil || cfg.OTA.ServerURL == "" {
+	if err := jsonUnmarshalLenient(rec.ConfigJSON, &cfg); err != nil || strings.TrimSpace(cfg.OTA.ServerURL) == "" {
 		return "", "", false
 	}
+	server := cleanOtaBase(cfg.OTA.ServerURL)
+	tofu.mu.Lock()
+	defer tofu.mu.Unlock()
+	if tofu.server == server && tofu.keyID != "" && tofu.pubB64 != "" {
+		return tofu.keyID, tofu.pubB64, true
+	}
+	if tofu.server != server {
+		tofu.server, tofu.keyID, tofu.pubB64 = server, "", ""
+	}
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(cleanOtaBase(cfg.OTA.ServerURL) + "/healthz")
+	resp, err := client.Get(server + "/healthz")
 	if err != nil {
 		return "", "", false
 	}
@@ -126,7 +127,7 @@ func fetchTOFUKey(db *gorm.DB) (keyID, pubB64 string, ok bool) {
 	if health.Server != "cairn-hub" || health.ContentKeyID == "" || health.ContentPublicKey == "" {
 		return "", "", false
 	}
-	tofu.keyID, tofu.pubB64 = health.ContentKeyID, health.ContentPublicKey
+	tofu.server, tofu.keyID, tofu.pubB64 = server, health.ContentKeyID, health.ContentPublicKey
 	return tofu.keyID, tofu.pubB64, true
 }
 

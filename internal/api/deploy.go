@@ -20,11 +20,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jiwei-cairn/cairn-pkg/pack"
 	"github.com/jiwei-cairn/cairn-platform/internal/buildinfo"
 	"github.com/jiwei-cairn/cairn-platform/internal/config"
 	"github.com/jiwei-cairn/cairn-platform/internal/hostmetrics"
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
+	"github.com/jiwei-cairn/cairn-platform/internal/pack"
 	"github.com/jiwei-cairn/cairn-platform/internal/store"
 
 	goruntime "runtime"
@@ -372,11 +372,16 @@ func (s *Server) upsertServiceDef(def *store.Service, hasSvc bool, m *pack.Manif
 		*pack.Manifest
 		Source string `json:"source"`
 	}{m, source})
+	svcType := m.ServiceType
+	if svcType == "" {
+		svcType = "native"
+	}
+	summary := firstNonEmpty(m.DisplayName, m.Name)
 
 	if !hasSvc {
 		def = &store.Service{
-			Name: m.Name, Version: m.Version, Summary: firstNonEmpty(m.DisplayName, m.Name),
-			ServiceType: "native", WebUrl: strings.TrimSpace(m.WebUrl),
+			Name: m.Name, Version: m.Version, Summary: summary,
+			ServiceType: svcType, WebUrl: strings.TrimSpace(m.WebUrl),
 			ExePath: exePath, WorkDir: dataDirOf(m.Name),
 			Args: mustJSON(nonNil(m.Args)), Env: mustJSON(env),
 			DependsOn: mustJSON(deps), Enabled: true, AutoStart: false,
@@ -386,14 +391,13 @@ func (s *Server) upsertServiceDef(def *store.Service, hasSvc bool, m *pack.Manif
 		applyManifestPolicies(def, m)
 	} else {
 		def.Version = m.Version
+		def.Summary = summary
+		def.ServiceType = svcType
+		def.WebUrl = strings.TrimSpace(m.WebUrl)
 		def.ExePath = exePath
 		def.WorkDir = dataDirOf(m.Name)
-		if len(m.Args) > 0 {
-			def.Args = mustJSON(m.Args)
-		}
-		if len(env) > 0 {
-			def.Env = mustJSON(env)
-		}
+		def.Args = mustJSON(nonNil(m.Args))
+		def.Env = mustJSON(env)
 		def.DependsOn = mustJSON(deps)
 		def.InstalledAt = time.Now()
 		def.Manifest = datatypesJSON(manifestRaw)

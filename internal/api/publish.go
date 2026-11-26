@@ -2,10 +2,10 @@
 //
 // 流程：
 //  1. buildExportPackage：当前安装态打成 .cairnpkg；
-//  2. uploadToHub：multipart 上传到 {ota.serverUrl}/publish，带上已导入的准入证书；
+//  2. uploadToHub：multipart 上传到 {ota.serverUrl}/publish，带上业务账户；
 //  3. 返回 hub 的落位结果（sha256 / canonical / idempotent）。
 //
-// hub 默认校验证书。未导入证书时，只有 hub 以 -anon-publish 启动才能发布。
+// hub 默认校验业务账户。未填写用户名和口令时，只有 hub 以 -anon-publish 启动才能发布。
 package api
 
 import (
@@ -42,7 +42,7 @@ const hubAPIVersion = 1
 // 地址无法区分，旧二进制只会让发布失败于「响应解析失败: invalid character 'p'」。
 // 探针拿不到 healthz（超时/404/非 JSON）时不阻断——可能是反向代理只放行了
 // /publish，那不是版本问题；探测失败交由实际上传给出准确错误。
-func probeHub(base, certJSON string) error {
+func probeHub(base string, cred hubCred) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(base + "/healthz")
 	if err != nil {
@@ -69,8 +69,8 @@ func probeHub(base, certJSON string) error {
 		return fmt.Errorf("服务端发布协议版本过旧（对端 apiVersion=%d，本平台需要 %d）；请重新构建 cairn-hub 后重启",
 			health.APIVersion, hubAPIVersion)
 	}
-	if health.Anonymous != nil && !*health.Anonymous && strings.TrimSpace(certJSON) == "" {
-		return fmt.Errorf("服务端要求准入证书。请在设置 → 远程升级中导入 hub 签发的证书")
+	if health.Anonymous != nil && !*health.Anonymous && !cred.configured() {
+		return fmt.Errorf("服务端要求业务账户。请在设置 → 远程升级服务器中填写用户名和口令")
 	}
 	return nil
 }
@@ -97,8 +97,9 @@ func (s *Server) PublishService(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "尚未配置远程服务器（设置 → 远程升级 → 服务器地址）")
 		return
 	}
-	// 能力探测：把「连到旧二进制 / 未开匿名」这两类配置问题在上传前说清楚。
-	if err := probeHub(cleanOtaBase(base), cfg.OTA.AccessCert); err != nil {
+	cred := hubCredFrom(cfg.OTA)
+	// 能力探测：把「连到旧二进制 / 未填账户」这两类配置问题在上传前说清楚。
+	if err := probeHub(cleanOtaBase(base), cred); err != nil {
 		fail(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -110,7 +111,7 @@ func (s *Server) PublishService(w http.ResponseWriter, r *http.Request) {
 	}
 	defer os.Remove(pkgPath)
 
-	res, err := uploadToHub(base, pkgPath, cfg.OTA.AccessCert)
+	res, err := uploadToHub(base, pkgPath, cred)
 	if err != nil {
 		var he *hubHTTPError
 		if errors.As(err, &he) {
@@ -119,7 +120,7 @@ func (s *Server) PublishService(w http.ResponseWriter, r *http.Request) {
 				fail(w, http.StatusConflict, err.Error()) // 冲突透传（版本已存在且内容不同）
 				return
 			case http.StatusUnauthorized, http.StatusForbidden:
-				fail(w, he.code, err.Error()+"。请确认设置中导入的是本枢纽当前签发的证书")
+				fail(w, he.code, err.Error()+"。请确认设置中的 Hub 用户名和口令")
 				return
 			}
 		}
@@ -143,9 +144,9 @@ func (e *hubHTTPError) Error() string {
 	return fmt.Sprintf("服务端拒绝（HTTP %d）：%s", e.code, e.body)
 }
 
-// uploadToHub 把本地包 multipart 流式上传到 hub /publish（无认证版）。
+// uploadToHub 把本地包 multipart 流式上传到 hub /publish。
 // 返回 hub 响应中的 data 字段（发布结果 JSON：name/version/canonical/sha256/sizeBytes/idempotent）。
-func uploadToHub(baseURL, pkgPath, certJSON string) (json.RawMessage, error) {
+func uploadToHub(baseURL, pkgPath string, cred hubCred) (json.RawMessage, error) {
 	base := cleanOtaBase(baseURL)
 	if base == "" {
 		return nil, fmt.Errorf("远程服务器未配置")
@@ -176,7 +177,7 @@ func uploadToHub(baseURL, pkgPath, certJSON string) (json.RawMessage, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	applyHubCert(req, certJSON)
+	cred.apply(req)
 
 	client := &http.Client{Timeout: publishUploadTimeout}
 	resp, err := client.Do(req)

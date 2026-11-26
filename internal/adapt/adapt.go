@@ -11,7 +11,6 @@ import (
 )
 
 // SupervisorAdapter supervisor.Engine → api.SupervisorFacade。
-// 高频指标（cpu/mem 等）留 0：M1 状态机口径。
 type SupervisorAdapter struct {
 	Eng *supervisor.Engine
 }

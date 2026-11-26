@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
-	"strings"
 
 	"github.com/jiwei-cairn/cairn-platform/internal/config"
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
@@ -13,13 +12,7 @@ import (
 
 // GetSettings 返回平台配置（Setting 单行表快照，缺失字段已回落默认值）。
 func (s *Server) GetSettings(w http.ResponseWriter, r *http.Request) {
-	cfg := s.Settings.Get()
-	imported := strings.TrimSpace(cfg.OTA.AccessCert) != ""
-	cfg.OTA.AccessCert = ""
-	ok(w, struct {
-		config.App
-		CertImported bool `json:"certImported"`
-	}{App: cfg, CertImported: imported})
+	ok(w, s.Settings.Get())
 }
 
 // needRestartItem 是“保存成功但需重启平台生效”的字段提示。
@@ -41,8 +34,6 @@ func (s *Server) SaveSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "JSON 解析失败: "+err.Error())
 		return
 	}
-	// 准入证书只由导入/移除接口改写，普通保存不动它。
-	next.OTA.AccessCert = prev.OTA.AccessCert
 	if issues := config.Validate(next); len(issues) > 0 {
 		failIssues(w, fmt.Sprintf("%d 处字段无效", len(issues)), issues)
 		return
@@ -86,34 +77,6 @@ func (s *Server) SaveSettings(w http.ResponseWriter, r *http.Request) {
 		logx.Module("api").Info("日志配额已热应用")
 	}
 	ok(w, map[string]any{"applied": applied, "needRestart": needRestart})
-}
-
-// ImportHubCert POST /api/settings/hub-cert：导入 hub 签发的准入证书原文。
-func (s *Server) ImportHubCert(w http.ResponseWriter, r *http.Request) {
-	raw, cert, err := readAccessCert(r)
-	if err != nil || cert.PlatformID == "" || cert.ID == "" || cert.Sig == "" {
-		fail(w, http.StatusBadRequest, "不是有效的准入证书文件")
-		return
-	}
-	cfg := s.Settings.Get()
-	cfg.OTA.AccessCert = strings.TrimSpace(string(raw))
-	if err := s.Settings.Save(cfg); err != nil {
-		fail(w, http.StatusInternalServerError, "保存证书失败: "+err.Error())
-		return
-	}
-	logx.Module("api").Info("已导入 hub 准入证书", "platform", cert.PlatformID, "expires", cert.ExpiresAt)
-	ok(w, map[string]any{"platformId": cert.PlatformID, "expiresAt": cert.ExpiresAt})
-}
-
-// ClearHubCert DELETE /api/settings/hub-cert：移除已导入的证书。
-func (s *Server) ClearHubCert(w http.ResponseWriter, r *http.Request) {
-	cfg := s.Settings.Get()
-	cfg.OTA.AccessCert = ""
-	if err := s.Settings.Save(cfg); err != nil {
-		fail(w, http.StatusInternalServerError, "移除证书失败: "+err.Error())
-		return
-	}
-	ok(w, map[string]any{"cleared": true})
 }
 
 // diffFields 对比两个同类型结构体，返回值不同的 json 字段名（camelCase）。

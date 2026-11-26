@@ -148,10 +148,14 @@ func DataDir(parts ...string) string { return rootJoin("data", parts...) }
 func LogsDir(parts ...string) string { return rootJoin("logs", parts...) }
 
 // UploadsDir 安装资源上传暂存目录（root/data/uploads）。
-func UploadsDir(parts ...string) string { return rootJoin("data", append([]string{"uploads"}, parts...)...) }
+func UploadsDir(parts ...string) string {
+	return rootJoin("data", append([]string{"uploads"}, parts...)...)
+}
 
 // RuntimeDir 进程登记目录（root/data/runtime，fork 认领登记落盘处）。
-func RuntimeDir(parts ...string) string { return rootJoin("data", append([]string{"runtime"}, parts...)...) }
+func RuntimeDir(parts ...string) string {
+	return rootJoin("data", append([]string{"runtime"}, parts...)...)
+}
 
 // ServicesDir 服务仓库根（root/services/{os}/{arch}）——安装制统一落盘位置。
 func ServicesDir(goos, goarch string, parts ...string) string {
@@ -173,9 +177,10 @@ func rootJoin(head string, parts ...string) string {
 // OTA 远程升级（Pull 模式，静态文件托管，decisions.md B1-B8）。
 // 服务器目录规范见 docs/upgrade/ota-server.md。
 type OTA struct {
-	ServerURL  string `json:"serverUrl"`            // 服务器基址，如 http://192.168.1.10:8090；空 = 未启用 OTA（出厂默认）
-	TimeoutSec int    `json:"timeoutSec"`           // 拉清单/下载超时（5–120s）
-	AccessCert string `json:"accessCert,omitempty"` // hub 签发的准入证书 JSON。设置页导入，不随普通表单回显
+	ServerURL  string `json:"serverUrl"`          // 服务器基址，如 http://192.168.1.10:8090；空 = 未启用远程服务器（出厂默认）
+	TimeoutSec int    `json:"timeoutSec"`         // 拉清单/下载超时（5–120s）
+	Username   string `json:"username,omitempty"` // hub 业务账户。升级和发布使用，市场不使用
+	Password   string `json:"password,omitempty"` // 与 Username 成对。留在本机设置里
 }
 
 // Web 平台 Web 服务。
@@ -236,6 +241,11 @@ func Validate(app App) []Issue {
 		if !otaURLPattern.MatchString(u) {
 			add("ota.serverUrl", "必须是 http:// 或 https:// 开头的基址（不含 /cairn 路径与尾斜杠）")
 		}
+	}
+	userSet := strings.TrimSpace(app.OTA.Username) != ""
+	passSet := app.OTA.Password != ""
+	if userSet != passSet {
+		add("ota.username", "用户名和口令需要一起填写")
 	}
 	rangeIssue("ota.timeoutSec", app.OTA.TimeoutSec >= 5 && app.OTA.TimeoutSec <= 120, "OTA 超时需在 5–120 秒")
 	rangeIssue("web.port", app.Web.Port >= 1 && app.Web.Port <= 65535, "端口需在 1–65535 之间")

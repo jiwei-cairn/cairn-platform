@@ -11,7 +11,7 @@ package assets
 import (
 	_ "embed"
 
-	"github.com/jiwei-cairn/cairn-pkg/pack"
+	"github.com/jiwei-cairn/cairn-platform/internal/pack"
 )
 
 //go:embed embedded-services-index.json

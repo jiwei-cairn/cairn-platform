@@ -140,7 +140,7 @@
 | H4 | 索引关系 | 根 `index.json` 为总索引，分域拉取 |
 
 > **H1 修订（2026-11-20）**：产品清单升级为**真实生成**——hub 扫描 `.cairnproduct`
->（manifest-only ZIP，格式定义在 cairn-pkg `pack/product.go`）并按 services 域同纪律
+>（manifest-only ZIP，格式定义在 `internal/pack`）并按 services 域同纪律
 > 校验（sha256 / 语义化版本 / 相对 url / **引用完整性**：引用的服务版本必须已发布）。
 > `POST /publish-product` 以 `publish-suite` scope 认证发布（同 sha 幂等 / 异 sha 拒绝）。
 > 编排安装语义（按 `services[]` 逐服务装包）仍留 M3。详见 `ota-server.md` §6。

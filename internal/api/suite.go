@@ -22,8 +22,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jiwei-cairn/cairn-pkg/pack"
 	"github.com/jiwei-cairn/cairn-platform/internal/logx"
+	"github.com/jiwei-cairn/cairn-platform/internal/pack"
 	"github.com/jiwei-cairn/cairn-platform/internal/store"
 )
 
@@ -66,8 +66,9 @@ func (s *Server) SuitePublish(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "尚未配置远程服务器（设置 → 远程升级 → 服务器地址）")
 		return
 	}
-	// hub 能力探测（复用 probeHub：旧二进制/匿名模式提前拦截）。
-	if err := probeHub(cleanOtaBase(base), cfg.OTA.AccessCert); err != nil {
+	cred := hubCredFrom(cfg.OTA)
+	// hub 能力探测（复用 probeHub：旧二进制/未填账户提前拦截）。
+	if err := probeHub(cleanOtaBase(base), cred); err != nil {
 		fail(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -96,7 +97,7 @@ func (s *Server) SuitePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── 引用完整性预检：hub 的服务域必须已含所有引用版本 ──
-	idx, err := fetchServicesIndex(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec)
+	idx, err := fetchServicesIndex(cfg.OTA.ServerURL, cfg.OTA.TimeoutSec, cred)
 	if err != nil {
 		fail(w, http.StatusBadGateway, "拉取服务端清单失败: "+err.Error())
 		return
@@ -138,7 +139,7 @@ func (s *Server) SuitePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── 上传 hub /publish-product ──
-	res, err := uploadSuiteToHub(cleanOtaBase(base), buf.Bytes(), req.Name, req.Version, cfg.OTA.AccessCert)
+	res, err := uploadSuiteToHub(cleanOtaBase(base), buf.Bytes(), req.Name, req.Version, cred)
 	if err != nil {
 		var he *hubHTTPError
 		if errors.As(err, &he) {
@@ -177,7 +178,7 @@ func buildProductZip(m *pack.ProductManifest) (*bytes.Buffer, error) {
 
 // uploadSuiteToHub multipart 上传 .cairnproduct 到 hub /publish-product。
 // 返回 hub 响应的 data 字段（发布结果）。
-func uploadSuiteToHub(base string, body []byte, name, version, certJSON string) (json.RawMessage, error) {
+func uploadSuiteToHub(base string, body []byte, name, version string, cred hubCred) (json.RawMessage, error) {
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
 	go func() {
@@ -196,7 +197,7 @@ func uploadSuiteToHub(base string, body []byte, name, version, certJSON string) 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	applyHubCert(req, certJSON)
+	cred.apply(req)
 
 	client := &http.Client{Timeout: publishUploadTimeout}
 	resp, err := client.Do(req)

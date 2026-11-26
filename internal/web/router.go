@@ -90,7 +90,7 @@ func Router(s *api.Server) http.Handler {
 		// 导出服务包（.cairnpkg，闭环出口 D9）。
 		r.Get("/services/{id}/export", s.ExportService)
 
-		// 发布服务到服务端（业务流程验证切片；认证随 Phase 3a 接入）。
+		// 发布服务到 Hub。请求带设置里的业务账户。
 		r.Post("/services/{id}/publish", s.PublishService)
 
 		// 市场目录（M2-9）：hub 两份清单的展示视图（安装状态由前端 join）。
@@ -104,8 +104,6 @@ func Router(s *api.Server) http.Handler {
 		r.Get("/settings", s.GetSettings)
 		r.Post("/settings", s.SaveSettings)
 		r.Put("/settings", s.SaveSettings)
-		r.Post("/settings/hub-cert", s.ImportHubCert)
-		r.Delete("/settings/hub-cert", s.ClearHubCert)
 	})
 
 	sub, _ := fs.Sub(staticFS, "static")
